@@ -51,6 +51,7 @@ stats = {
     "ai_calls": 0,
     "search_count": 0,
     "xoso_count": 0,
+    "weather_count": 0,
     "errors": 0,
     "started_at": time.time(),
 }
@@ -401,6 +402,168 @@ def check_lottery_ticket(user_number: str, province_input: str = "mb", date_str:
     return "\n".join(msg_parts)
 
 
+# ========== WEATHER — Open-Meteo (FREE, no API key) ==========
+
+OPEN_METEO_GEOCODE = "https://geocoding-api.open-meteo.com/v1/search"
+OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
+
+# WMO weather code → Vietnamese description (with emoji)
+WMO_VI = {
+    0:  ("☀️ Trời quang", "Trời quang"),
+    1:  ("🌤️ Trời hầu như quang", "Trời hầu như quang"),
+    2:  ("⛅ Có mây rải rác", "Có mây rải rác"),
+    3:  ("☁️ Trời u ám", "Trời u ám"),
+    45: ("🌫️ Có sương mù", "Sương mù"),
+    48: ("🌫️ Sương mù đóng băng", "Sương mù đóng băng"),
+    51: ("🌦️ Mưa phùn nhẹ", "Mưa phùn nhẹ"),
+    53: ("🌦️ Mưa phùn vừa", "Mưa phùn vừa"),
+    55: ("🌧️ Mưa phùn dày", "Mưa phùn dày"),
+    56: ("🌧️ Mưa phùn lạnh", "Mưa phùn lạnh"),
+    57: ("🌧️ Mưa phùn lạnh", "Mưa phùn lạnh"),
+    61: ("🌧️ Mưa nhỏ", "Mưa nhỏ"),
+    63: ("🌧️ Mưa vừa", "Mưa vừa"),
+    65: ("⛈️ Mưa to", "Mưa to"),
+    66: ("🌧️ Mưa lạnh", "Mưa lạnh"),
+    67: ("🌧️ Mưa lạnh", "Mưa lạnh"),
+    71: ("🌨️ Tuyết rơi nhẹ", "Tuyết rơi nhẹ"),
+    73: ("🌨️ Tuyết rơi vừa", "Tuyết rơi vừa"),
+    75: ("❄️ Tuyết rơi dày", "Tuyết rơi dày"),
+    77: ("❄️ Tuyết hạt", "Tuyết hạt"),
+    80: ("🌦️ Mưa rào nhẹ", "Mưa rào nhẹ"),
+    81: ("🌧️ Mưa rào vừa", "Mưa rào vừa"),
+    82: ("⛈️ Mưa rào rất to", "Mưa rào rất to"),
+    85: ("🌨️ Mưa tuyết rào", "Mưa tuyết rào"),
+    86: ("🌨️ Mưa tuyết rào", "Mưa tuyết rào"),
+    95: ("⛈️ Dông", "Dông"),
+    96: ("⛈️ Dông có mưa đá", "Dông có mưa đá"),
+    99: ("⛈️ Dông có mưa đá", "Dông có mưa đá"),
+}
+
+def wmo_to_vi(code: int) -> str:
+    """Convert WMO weather code to emoji + Vietnamese description."""
+    entry = WMO_VI.get(int(code))
+    return entry[0] if entry else f"🌡️ Mã thời tiết {code}"
+
+
+def geocode_city(city: str) -> dict:
+    """Geocode a city name → {name, latitude, longitude, country}."""
+    try:
+        r = requests.get(OPEN_METEO_GEOCODE, params={
+            "name": city,
+            "count": 1,
+            "language": "vi",
+            "format": "json",
+        }, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("results"):
+            return {"error": f"Không tìm thấy thành phố '{city}'."}
+        place = data["results"][0]
+        return {
+            "name": place["name"],
+            "latitude": place["latitude"],
+            "longitude": place["longitude"],
+            "country": place.get("country", ""),
+        }
+    except Exception as e:
+        return {"error": f"Lỗi tìm thành phố: {e}"}
+
+
+def fetch_weather(lat: float, lon: float, days: int = 7) -> dict:
+    """Fetch current weather + N-day forecast from Open-Meteo (FREE, no API key)."""
+    try:
+        r = requests.get(OPEN_METEO_FORECAST, params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": ("temperature_2m,relative_humidity_2m,apparent_temperature,"
+                        "precipitation,weather_code,wind_speed_10m,wind_direction_10m"),
+            "daily": ("weather_code,temperature_2m_max,temperature_2m_min,"
+                      "precipitation_probability_max,precipitation_sum,sunrise,sunset,wind_speed_10m_max"),
+            "timezone": "Asia/Ho_Chi_Minh",
+            "forecast_days": days,
+        }, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": f"Lỗi tải thời tiết: {e}"}
+
+
+def get_weather_report(city: str, days: int = 7) -> str:
+    """One-shot: city name → formatted weather report in Vietnamese."""
+    place = geocode_city(city)
+    if "error" in place:
+        return f"❌ {place['error']}"
+    
+    w = fetch_weather(place["latitude"], place["longitude"], days)
+    if "error" in w:
+        return f"❌ {w['error']}"
+    
+    # Build the message
+    parts = []
+    parts.append(f"🌤️ THỜI TIẾT: {place['name']}, {place['country']}")
+    parts.append(f"📍 Vị trí: {place['latitude']:.2f}, {place['longitude']:.2f}")
+    parts.append("─" * 30)
+    
+    # Current conditions
+    c = w.get("current", {})
+    if c:
+        parts.append("⏱️ HIỆN TẠI")
+        temp = c.get("temperature_2m", 0)
+        feels = c.get("apparent_temperature", 0)
+        humidity = c.get("relative_humidity_2m", 0)
+        precip = c.get("precipitation", 0)
+        wind = c.get("wind_speed_10m", 0)
+        wind_dir = c.get("wind_direction_10m", 0)
+        code = c.get("weather_code", 0)
+        parts.append(f"{wmo_to_vi(code)}")
+        parts.append(f"🌡️ Nhiệt độ: {temp}°C (cảm giác {feels}°C)")
+        parts.append(f"💧 Độ ẩm: {humidity}%")
+        parts.append(f"💨 Gió: {wind} km/h (hướng {wind_dir}°)")
+        parts.append(f"🌧️ Mưa: {precip} mm")
+    
+    # Daily forecast
+    d = w.get("daily", {})
+    if d and d.get("time"):
+        parts.append("")
+        parts.append(f"📅 DỰ BÁO {len(d['time'])} NGÀY")
+        for i, date in enumerate(d["time"]):
+            code = d.get("weather_code", [0])[i]
+            max_t = d.get("temperature_2m_max", [0])[i]
+            min_t = d.get("temperature_2m_min", [0])[i]
+            rain_prob = d.get("precipitation_probability_max", [0])[i]
+            rain_mm = d.get("precipitation_sum", [0])[i]
+            wind_max = d.get("wind_speed_10m_max", [0])[i]
+            desc = wmo_to_vi(code).split(" ", 1)[-1] if " " in wmo_to_vi(code) else wmo_to_vi(code)
+            # Format date DD/MM
+            try:
+                dd = date.split("-")[2]
+                mm = date.split("-")[1]
+                date_str = f"{dd}/{mm}"
+            except Exception:
+                date_str = date
+            parts.append(
+                f"  {date_str}  {desc:<22} "
+                f"{min_t}–{max_t}°C  mưa {rain_prob}% ({rain_mm}mm)  gió {wind_max}km/h"
+            )
+    
+    # Sunrise/sunset for today
+    sunrise = d.get("sunrise", [None])[0] if d else None
+    sunset = d.get("sunset", [None])[0] if d else None
+    if sunrise or sunset:
+        parts.append("")
+        if sunrise:
+            sr = sunrise.split("T")[1] if "T" in sunrise else sunrise
+            parts.append(f"🌅 Bình minh: {sr}")
+        if sunset:
+            ss = sunset.split("T")[1] if "T" in sunset else sunset
+            parts.append(f"🌇 Hoàng hôn: {ss}")
+    
+    parts.append("")
+    parts.append("📡 Nguồn: Open-Meteo (FREE, no API key)")
+    
+    return "\n".join(parts)
+
+
 # ========== BOT LOGIC ==========
 
 bot_app = None
@@ -442,8 +605,11 @@ async def cmd_help(update: Update, context):
         "    VD: /xoso 04 danang (Đà Nẵng)\n"
         "    VD: /xoso 94504 mb 08-09-2026 (ngày cụ thể)\n"
         "    Gõ /xoso để xem tất cả tỉnh hỗ trợ\n\n"
-        "🌤️ /weather <địa điểm> → Thời tiết\n"
-        "    VD: /weather Hà Nội\n\n"
+        "🌤️ /weather <địa điểm> [số ngày] → Thời tiết\n"
+        "    VD: /weather Hà Nội\n"
+        "    VD: /weather Đà Nẵng 3 (3 ngày)\n"
+        "    VD: /weather Tokyo, /weather London\n"
+        "    📡 Open-Meteo (FREE, no API key)\n\n"
         "📱 /qr <text> → Tạo QR code\n"
         "    VD: /qr https://google.com\n\n"
         "🌐 /translate [lang] <text> → Dịch văn bản\n"
@@ -611,34 +777,57 @@ async def cmd_xoso(update: Update, context):
 # ========== NEW UTILITY COMMANDS ==========
 
 async def cmd_weather(update: Update, context):
-    """Weather — /weather <location>"""
+    """Weather — /weather <location> [days]"""
     if not context.args:
-        await update.message.reply_text("🌤️ Gõ: /weather <địa điểm>\nVD: /weather Hà Nội")
+        await update.message.reply_text(
+            "🌤️ DỰ BÁO THỜI TIẾT\n\n"
+            "Cách dùng:\n"
+            "• /weather <địa điểm> → Hiện tại + 7 ngày\n"
+            "• /weather <địa điểm> 3 → Số ngày tùy chọn (1-16)\n\n"
+            "VD:\n"
+            "  /weather Hà Nội\n"
+            "  /weather Hồ Chí Minh\n"
+            "  /weather Đà Nẵng 3\n"
+            "  /weather Tokyo\n"
+            "  /weather London\n\n"
+            "📡 Nguồn: Open-Meteo (FREE, không cần API key)"
+        )
         return
-    location = " ".join(context.args)
+    
+    args = context.args
+    # Last arg may be number of days
+    days = 7
+    if len(args) >= 2 and args[-1].isdigit():
+        days_req = int(args[-1])
+        if 1 <= days_req <= 16:
+            days = days_req
+            args = args[:-1]
+    
+    location = " ".join(args)
+    if not location:
+        await update.message.reply_text("❌ Vui lòng nhập tên địa điểm.")
+        return
+    
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
-    log(f"/weather: {location}")
+    log(f"/weather: {location} ({days} days)")
     
-    # Use Tavily to search weather (free, no separate API needed)
-    result = search_web(f"thời tiết {location} hôm nay", max_results=3)
-    stats["search_count"] += 1
+    report = get_weather_report(location, days=days)
     
-    parts = [f"🌤️ THỜI TIẾT: {location}", "─" * 30, ""]
-    if result.get("answer"):
-        parts.append(result["answer"][:1200])
+    # Add weather count to stats
+    if "weather_count" not in stats:
+        stats["weather_count"] = 0
+    stats["weather_count"] += 1
+    
+    # Split long messages
+    if len(report) > 1900:
+        for i in range(0, len(report), 1900):
+            await update.message.reply_text(report[i:i+1900])
+            await asyncio.sleep(0.3)
     else:
-        parts.append("❌ Không tìm thấy thông tin thời tiết.")
+        await update.message.reply_text(report)
     
-    if result.get("results"):
-        parts.append("")
-        parts.append("📎 Nguồn:")
-        for i, item in enumerate(result["results"][:2], 1):
-            parts.append(f"{i}. {item.get('title', '')[:60]}")
-            if item.get("url"):
-                parts.append(f"   🔗 {item['url']}")
-    
-    await update.message.reply_text("\n".join(parts))
     stats["messages_sent"] += 1
+    log(f"🤖 Weather reply sent ({len(report)} chars)")
 
 
 async def cmd_qr(update: Update, context):
@@ -970,6 +1159,7 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="stat-card"><div class="stat-value">{{ stats.images_generated }}</div><div class="stat-label">Ảnh tạo</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.search_count }}</div><div class="stat-label">Tìm kiếm</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.xoso_count }}</div><div class="stat-label">Dò vé số</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.weather_count }}</div><div class="stat-label">Thời tiết</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.errors }}</div><div class="stat-label">Lỗi</div></div>
   </div>
   
@@ -980,7 +1170,7 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="cmd-card"><code>/code &lt;câu hỏi&gt;</code><p>Hỏi về lập trình</p></div>
     <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm kiếm web (Tavily)</p></div>
     <div class="cmd-card"><code>/xoso &lt;số&gt; [tỉnh]</code><p>Dò vé số theo tỉnh</p></div>
-    <div class="cmd-card"><code>/weather &lt;nơi&gt;</code><p>Thời tiết</p></div>
+    <div class="cmd-card"><code>/weather &lt;nơi&gt; [số ngày]</code><p>Thời tiết (Open-Meteo free)</p></div>
     <div class="cmd-card"><code>/qr &lt;text&gt;</code><p>Tạo QR code</p></div>
     <div class="cmd-card"><code>/translate [lang] &lt;text&gt;</code><p>Dịch văn bản</p></div>
     <div class="cmd-card"><code>/calc &lt;biểu thức&gt;</code><p>Máy tính khoa học</p></div>
