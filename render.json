@@ -1,0 +1,18 @@
+{
+  "name": "NhutBot — Zalo AI Bot",
+  "description": "Zalo AI Bot with Nhutbot 1.0 Flash + Pollinations.ai image generation + Flask dashboard",
+  "repository": "https://github.com/nhut0902/zalo-bot",
+  "env": {
+    "ZALO_BOT_TOKEN": {
+      "description": "Zalo Bot Token from bot.zaloplatforms.com",
+      "value": "1903914807132028399:BsUtmLazGynhSDfuGIwkzjcibFDuaCOsKoPauZopkPSiGmtoVexXKBANOjYHQhxU"
+    },
+    "PORT": {
+      "description": "Port (auto-set by Render)",
+      "value": "10000"
+    }
+  },
+  "buildCommand": "pip install -r requirements.txt",
+  "startCommand": "gunicorn bot:app --bind 0.0.0.0:$PORT --workers 1 --threads 4",
+  "healthCheckPath": "/health"
+}
