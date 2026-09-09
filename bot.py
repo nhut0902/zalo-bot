@@ -295,18 +295,54 @@ def health():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Zalo webhook endpoint (if configured)."""
-    data = request.json
+    data = request.json or {}
     log(f"Webhook received: {json.dumps(data)[:200]}")
-    # Process update
-    if bot_app and data:
+    # Zalo wraps the update in `{"ok": true, "result": {...}}`
+    payload = data.get("result", data) if isinstance(data, dict) else data
+    if bot_app and payload:
         try:
             loop = asyncio.new_event_loop()
-            update = Update.de_json(data)
+            update = Update.de_json(payload, bot_app.bot)
             loop.run_until_complete(bot_app.process_update(update))
             loop.close()
         except Exception as e:
             log(f"Webhook error: {e}")
+            stats["errors"] += 1
     return jsonify({"ok": True})
+
+
+@app.route("/setup-webhook")
+def setup_webhook():
+    """Call this once after deploy to register the webhook URL with Zalo."""
+    host = request.host_url.rstrip("/")
+    webhook_url = f"{host}/webhook"
+    secret = "nhutbot-secret-2024"
+    log(f"Setting webhook URL: {webhook_url}")
+    try:
+        # Use sync wrapper of Bot.set_webhook
+        from zalo_bot import Bot as _Bot
+        b = _Bot(token=ZALO_BOT_TOKEN, base_url=ZALO_BASE_URL)
+        ok = b.set_webhook(url=webhook_url, secret_token=secret)
+        return jsonify({
+            "ok": ok,
+            "webhook_url": webhook_url,
+            "secret": secret,
+            "message": "Webhook registered. Bot will now reply to messages on Zalo." if ok else "Failed to set webhook."
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/remove-webhook")
+def remove_webhook():
+    """Remove webhook so we can use long polling again."""
+    try:
+        from zalo_bot import Bot as _Bot
+        b = _Bot(token=ZALO_BOT_TOKEN, base_url=ZALO_BASE_URL)
+        ok = b.delete_webhook()
+        return jsonify({"ok": ok, "message": "Webhook removed — bot will use long polling."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ========== BOT THREAD ==========
@@ -322,13 +358,25 @@ def run_bot_polling():
         stats["errors"] += 1
 
 
+# ========== INIT FOR SERVERLESS ==========
+
+# Always initialize bot handlers at module load so webhook endpoint works
+# (On Vercel/serverless, __main__ doesn't run — only the Flask `app` is exposed)
+try:
+    init_bot()
+    log("Bot handlers initialized (webhook mode ready)")
+except Exception as e:
+    log(f"init_bot error (will retry on demand): {e}")
+
+
 # ========== MAIN ==========
 
 if __name__ == "__main__":
     log("=" * 50)
     log("🤖 NhutBot — Zalo AI Bot starting...")
     log(f"Bot Token: {ZALO_BOT_TOKEN[:20]}...")
-    
+    log(f"Base URL: {ZALO_BASE_URL}")
+
     # Get AI JWT
     log("Connecting to AI Cloud...")
     get_jwt()
@@ -336,14 +384,14 @@ if __name__ == "__main__":
         log("✅ AI Cloud ready (Nhutbot 1.0 Flash)")
     else:
         log("⚠️ AI Cloud unavailable")
-    
+
     # Start bot in background thread
     bot_thread = threading.Thread(target=run_bot_polling, daemon=True)
     bot_thread.start()
     log("Bot polling thread started")
-    
+
     # Start Flask dashboard
     log(f"Dashboard: http://0.0.0.0:{PORT}")
     log("=" * 50)
-    
+
     app.run(host="0.0.0.0", port=PORT)
