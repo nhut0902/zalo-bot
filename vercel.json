@@ -15,6 +15,7 @@
   ],
   "env": {
     "ZALO_BOT_TOKEN": "1903914807132028399:BsUtmLazGynhSDfuGIwkzjcibFDuaCOsKoPauZopkPSiGmtoVexXKBANOjYHQhxU",
-    "ZALO_BASE_URL": "https://bot-api.zaloplatforms.com"
+    "ZALO_BASE_URL": "https://bot-api.zaloplatforms.com",
+    "TAVILY_API_KEY": "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"
   }
 }

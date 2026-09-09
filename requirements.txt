@@ -2,3 +2,5 @@ flask
 gunicorn
 python-zalo-bot
 requests
+tavily-python
+beautifulsoup4

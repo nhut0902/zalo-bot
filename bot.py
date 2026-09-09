@@ -2,23 +2,26 @@
 """
 Zalo AI Bot — NhutBot
 =====================
-Project độc lập — Zalo Bot chạy trên Render với dashboard Flask.
+Project độc lập — Zalo Bot chạy trên Vercel (webhook) với dashboard Flask.
 
 Tính năng:
 - AI trả lời thông minh (Nhutbot 1.0 Flash qua AI Cloud proxy)
 - /image <mô tả> — Tạo ảnh bằng AI (Pollinations.ai)
 - /code <câu hỏi> — Trả lời câu hỏi code
+- /search <từ khóa> — Tìm kiếm web (Tavily API)
+- /xoso <số> — Dò vé số Miền Bắc / Trung / Nam (xoso.com.vn, FREE)
 - Dashboard web tại / — hiển thị stats + logs
-- Webhook mode (Render) + Long Polling fallback
-
-Deploy: Render.com (web service)
+- Webhook mode (Vercel) + Long Polling fallback (local)
 """
 
 import os
+import re
 import json
 import time
 import asyncio
 import threading
+import datetime
+import urllib.parse
 import requests
 from flask import Flask, request, jsonify, render_template_string
 from zalo_bot import Bot, Update
@@ -33,6 +36,7 @@ ZALO_BOT_TOKEN = os.environ.get("ZALO_BOT_TOKEN", "1903914807132028399:BsUtmLazG
 ZALO_BASE_URL = os.environ.get("ZALO_BASE_URL", "https://bot-api.zaloplatforms.com")
 AI_CLOUD_URL = "https://mcp-hub-ai-cloud.vercel.app/api/chat"
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt"
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "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")
 PORT = int(os.environ.get("PORT", 10000))
 
 SYSTEM_PROMPT = """Bạn là NhutBot — trợ lý AI thân thiện trên Zalo.
@@ -45,6 +49,8 @@ stats = {
     "messages_sent": 0,
     "images_generated": 0,
     "ai_calls": 0,
+    "search_count": 0,
+    "xoso_count": 0,
     "errors": 0,
     "started_at": time.time(),
 }
@@ -109,6 +115,173 @@ def make_image_url(prompt: str) -> str:
     return f"{POLLINATIONS_URL}/{urllib.parse.quote(prompt[:500])}?width=768&height=768&model=flux&nologo=true"
 
 
+# ========== WEB SEARCH (Tavily) ==========
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    """Search the web using Tavily API. Returns dict with 'answer' and 'results'."""
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(TAVILY_API_KEY)
+        resp = client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=max_results,
+            include_answer=True,
+        )
+        answer = resp.get("answer", "")
+        results = resp.get("results", [])
+        return {"answer": answer, "results": results}
+    except Exception as e:
+        return {"answer": "", "results": [], "error": str(e)}
+
+
+# ========== LOTTERY (Xổ số) — FREE via xoso.com.vn ==========
+
+XOSO_BASE = "https://xoso.com.vn"
+XOSO_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+# Prize labels in Vietnamese for display
+PRIZE_LABELS = {
+    "DB": "🎯 Đặc biệt",
+    "1": "🥇 Giải nhất",
+    "2": "🥈 Giải nhì",
+    "3": "🥉 Giải ba",
+    "4": "4️⃣ Giải tư",
+    "5": "5️⃣ Giải năm",
+    "6": "6️⃣ Giải sáu",
+    "7": "7️⃣ Giải bảy",
+    "8": "8️⃣ Giải tám",
+}
+
+def fetch_xoso_results(region: str = "mb", date_str: str = None) -> dict:
+    """
+    Fetch lottery results from xoso.com.vn (FREE, no API key).
+    region: 'mb' (Miền Bắc), 'mn' (Miền Nam), 'mt' (Miền Trung)
+    date_str: 'DD-MM-YYYY' format, default = today
+    Returns dict: {date, region, prizes: {prize_code: [numbers]}, error: str}
+    """
+    if not date_str:
+        date_str = datetime.datetime.now().strftime("%d-%m-%Y")
+    
+    url = f"{XOSO_BASE}/xs{region}-{date_str}.html"
+    try:
+        resp = requests.get(url, headers=XOSO_HEADERS, timeout=15)
+        if resp.status_code == 404:
+            return {"error": f"Chưa có kết quả xổ số ngày {date_str} (có thể chưa quay)."}
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as e:
+        return {"error": f"Lỗi tải KQXS: {e}"}
+    
+    # Parse prize spans: <span id="{region}_prize{CODE}_item{N}">NUMBER</span>
+    # Examples: mb_prizeDB_item0, mb_prize1_item0, mb_prize2_item0, ...
+    prizes = {}
+    pattern = re.compile(
+        rf'{region}_prize(DB|[1-8])_item\d+[^>]*>\s*([0-9\s]+)\s*</span>',
+        re.IGNORECASE
+    )
+    for m in pattern.finditer(html):
+        code = m.group(1).upper().replace("DB", "DB")
+        num = re.sub(r'\s+', '', m.group(2))
+        if code not in prizes:
+            prizes[code] = []
+        if num and num not in prizes[code]:
+            prizes[code].append(num)
+    
+    if not prizes:
+        return {"error": f"Không tìm thấy kết quả xổ số cho {region.upper()} ngày {date_str}."}
+    
+    # Find title to confirm date
+    title_match = re.search(r'<title>([^<]+)</title>', html)
+    title = title_match.group(1).strip() if title_match else ""
+    
+    return {
+        "region": region.upper(),
+        "date": date_str,
+        "title": title,
+        "prizes": prizes,
+    }
+
+
+def check_lottery_ticket(user_number: str, region: str = "mb", date_str: str = None) -> str:
+    """
+    Check a user's lottery number against today's results.
+    user_number: 2-6 digit number (or comma-separated multiple numbers)
+    Returns formatted message with results.
+    """
+    # Normalize input: extract all numbers
+    numbers = re.findall(r'\d+', user_number)
+    if not numbers:
+        return "❌ Vui lòng nhập số vé. VD: /xoso 94504 hoặc /xoso 04,94504"
+    
+    # Fetch results
+    result = fetch_xoso_results(region, date_str)
+    if "error" in result:
+        return f"❌ {result['error']}"
+    
+    prizes = result["prizes"]
+    region_name = {"MB": "Miền Bắc", "MN": "Miền Nam", "MT": "Miền Trung"}.get(result["region"], result["region"])
+    
+    msg_parts = [
+        f"🎰 DÒ VÉ SỐ {region_name}",
+        f"📅 Ngày: {result['date']}",
+        f"{'─' * 30}",
+        f"🎟️ Số của bạn: {', '.join(numbers)}",
+        f"{'─' * 30}",
+        "",
+    ]
+    
+    # Check each user number
+    wins = []
+    for num in numbers:
+        num_clean = num.lstrip('0') or '0'
+        # Check against each prize — match by full number or last 2 digits for lower prizes
+        for code, win_nums in prizes.items():
+            for win_num in win_nums:
+                win_clean = win_num.lstrip('0') or '0'
+                # Match logic:
+                # - DB, G1 (5-digit): exact match
+                # - G2-7: for 2-digit user input, match last 2 digits
+                # - For full user input length, match exact
+                matched = False
+                if len(num) >= 5 and num == win_num:
+                    matched = True
+                elif len(num) == 2 and len(win_num) >= 2 and win_num[-2:] == num:
+                    matched = True
+                elif num == win_num:
+                    matched = True
+                
+                if matched:
+                    label = PRIZE_LABELS.get(code, f"Giải {code}")
+                    wins.append(f"🎉 Số **{num}** trúng {label}! (KQ: {win_num})")
+    
+    if wins:
+        msg_parts.append("🥳 KẾT QUẢ DÒ:")
+        msg_parts.extend(f"  {w}" for w in wins)
+        msg_parts.append("")
+        msg_parts.append("Chúc mừng bạn! 🎊")
+    else:
+        msg_parts.append("😢 Rất tiếc, không trúng giải.")
+        msg_parts.append("")
+        # Show today's DB prize for reference
+        db_prize = prizes.get("DB", [])
+        if db_prize:
+            msg_parts.append(f"🎯 KQ Giải Đặc biệt hôm nay: {', '.join(db_prize)}")
+    
+    msg_parts.append(f"{'─' * 30}")
+    msg_parts.append("📋 Tất cả KQXS hôm nay:")
+    for code in ["DB", "1", "2", "3", "4", "5", "6", "7", "8"]:
+        if code in prizes:
+            label = PRIZE_LABELS.get(code, f"Giải {code}")
+            nums = ", ".join(prizes[code])
+            msg_parts.append(f"  {label}: {nums}")
+    
+    msg_parts.append("")
+    msg_parts.append("📊 Nguồn: xoso.com.vn")
+    
+    return "\n".join(msg_parts)
+
+
 # ========== BOT LOGIC ==========
 
 bot_app = None
@@ -122,6 +295,8 @@ async def cmd_start(update: Update, context):
         "• Nhắn tin → AI trả lời\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
         "• /code <câu hỏi> → Hỏi code\n"
+        "• /search <từ khóa> → Tìm kiếm web\n"
+        "• /xoso <số> → Dò vé số\n"
         "• /help → Trợ giúp"
     )
     stats["messages_sent"] += 1
@@ -129,10 +304,18 @@ async def cmd_start(update: Update, context):
 
 async def cmd_help(update: Update, context):
     await update.message.reply_text(
-        "📋 HƯỚNG DẪN\n\n"
-        "🤖 Nhắn tin → AI trả lời\n"
-        "🎨 /image <mô tả> → Tạo ảnh\n"
-        "💻 /code <câu hỏi> → Code help\n"
+        "📋 HƯỚNG DẪN NhutBot\n\n"
+        "🤖 Nhắn tin → AI trả lời thông minh\n\n"
+        "🎨 /image <mô tả> → Tạo ảnh AI\n"
+        "    VD: /image con mèo trên mặt trăng\n\n"
+        "💻 /code <câu hỏi> → Hỏi về lập trình\n"
+        "    VD: /code hàm fibonacci Python\n\n"
+        "🔍 /search <từ khóa> → Tìm kiếm web\n"
+        "    VD: /search giá vàng hôm nay\n\n"
+        "🎰 /xoso <số> [miền] → Dò vé số\n"
+        "    VD: /xoso 94504\n"
+        "    VD: /xoso 94504 mn (Miền Nam)\n"
+        "    VD: /xoso 04 mb 08-09-2026\n\n"
         "💡 Nhắn tự nhiên, AI hiểu tiếng Việt!"
     )
     stats["messages_sent"] += 1
@@ -162,6 +345,115 @@ async def cmd_code(update: Update, context):
     await update.message.reply_text(reply)
     stats["messages_sent"] += 1
     log(f"/code: {question[:50]}")
+
+
+async def cmd_search(update: Update, context):
+    """Search the web using Tavily API."""
+    if not context.args:
+        await update.message.reply_text(
+            "🔍 Gõ: /search <từ khóa>\n\n"
+            "VD:\n"
+            "• /search giá vàng hôm nay\n"
+            "• /search tỷ giá USD VND\n"
+            "• /search tin tức AI mới nhất"
+        )
+        return
+    query = " ".join(context.args)
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/search: {query[:60]}")
+    
+    result = search_web(query, max_results=5)
+    stats["search_count"] += 1
+    
+    if result.get("error"):
+        await update.message.reply_text(f"❌ Lỗi tìm kiếm: {result['error']}")
+        stats["errors"] += 1
+        return
+    
+    parts = [f"🔍 KẾT QUẢ TÌM KIẾM: \"{query}\"", "─" * 30, ""]
+    
+    if result.get("answer"):
+        parts.append("💡 Câu trả lời AI:")
+        parts.append(result["answer"][:1500])
+        parts.append("")
+        parts.append("─" * 30)
+    
+    if result.get("results"):
+        parts.append("📎 Nguồn tham khảo:")
+        for i, item in enumerate(result["results"][:5], 1):
+            title = item.get("title", "N/A")[:80]
+            url = item.get("url", "")
+            snippet = (item.get("content") or "")[:150].replace("\n", " ")
+            parts.append(f"\n{i}. {title}")
+            if snippet:
+                parts.append(f"   {snippet}...")
+            if url:
+                parts.append(f"   🔗 {url}")
+    
+    reply = "\n".join(parts)
+    # Split long messages
+    if len(reply) > 1900:
+        for i in range(0, len(reply), 1900):
+            await update.message.reply_text(reply[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(reply)
+    
+    stats["messages_sent"] += 1
+    log(f"🤖 Search reply sent ({len(reply)} chars)")
+
+
+async def cmd_xoso(update: Update, context):
+    """Check lottery ticket — /xoso <number> [region] [date]"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎰 DÒ VÉ SỐ\n\n"
+            "Cách dùng:\n"
+            "• /xoso <số> → Dò KQXS Miền Bắc hôm nay\n"
+            "• /xoso <số> mb|mn|mt → Chọn miền (Bắc/Nam/Trung)\n"
+            "• /xoso <số> mb 08-09-2026 → Dò ngày cụ thể\n\n"
+            "VD:\n"
+            "  /xoso 94504\n"
+            "  /xoso 94504,04,15\n"
+            "  /xoso 94504 mn\n"
+            "  /xoso 04 mb 08-09-2026\n\n"
+            "📊 Nguồn: xoso.com.vn (FREE)"
+        )
+        return
+    
+    args = context.args
+    user_input = args[0]
+    region = "mb"
+    date_str = None
+    
+    # Parse optional region (mb/mn/mt)
+    if len(args) >= 2 and args[1].lower() in ("mb", "mn", "mt"):
+        region = args[1].lower()
+        if len(args) >= 3:
+            date_str = args[2]
+    elif len(args) >= 2:
+        # Maybe 2nd arg is a date
+        date_match = re.match(r'(\d{1,2})-(\d{1,2})-(\d{4})$', args[1])
+        if date_match:
+            date_str = args[1]
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/xoso: {user_input} ({region}) date={date_str}")
+    
+    result_msg = check_lottery_ticket(user_input, region=region, date_str=date_str)
+    stats["xoso_count"] += 1
+    
+    # Split long messages
+    if len(result_msg) > 1900:
+        for i in range(0, len(result_msg), 1900):
+            await update.message.reply_text(result_msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(result_msg)
+    
+    stats["messages_sent"] += 1
+    log(f"🤖 Xoso reply sent ({len(result_msg)} chars)")
+
 
 async def on_message(update: Update, context):
     stats["messages_received"] += 1
@@ -198,6 +490,8 @@ def init_bot():
     bot_app.add_handler(CommandHandler("help", cmd_help))
     bot_app.add_handler(CommandHandler("image", cmd_image))
     bot_app.add_handler(CommandHandler("code", cmd_code))
+    bot_app.add_handler(CommandHandler("search", cmd_search))
+    bot_app.add_handler(CommandHandler("xoso", cmd_xoso))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
@@ -247,6 +541,8 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="stat-card"><div class="stat-value">{{ stats.messages_sent }}</div><div class="stat-label">Tin gửi</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.ai_calls }}</div><div class="stat-label">AI calls</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.images_generated }}</div><div class="stat-label">Ảnh tạo</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.search_count }}</div><div class="stat-label">Tìm kiếm</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.xoso_count }}</div><div class="stat-label">Dò vé số</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.errors }}</div><div class="stat-label">Lỗi</div></div>
   </div>
   
@@ -255,6 +551,8 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="cmd-card"><code>/help</code><p>Hiển thị trợ giúp</p></div>
     <div class="cmd-card"><code>/image &lt;mô tả&gt;</code><p>Tạo ảnh bằng AI</p></div>
     <div class="cmd-card"><code>/code &lt;câu hỏi&gt;</code><p>Hỏi về lập trình</p></div>
+    <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm kiếm web (Tavily)</p></div>
+    <div class="cmd-card"><code>/xoso &lt;số&gt;</code><p>Dò vé số Miền Bắc/Trung/Nam</p></div>
     <div class="cmd-card"><code>Nhắn tin</code><p>AI trả lời thông minh</p></div>
   </div>
   
