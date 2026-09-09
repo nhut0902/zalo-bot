@@ -27,6 +27,10 @@ from zalo_bot.constants import ChatAction
 
 # ========== CONFIG ==========
 ZALO_BOT_TOKEN = os.environ.get("ZALO_BOT_TOKEN", "1903914807132028399:BsUtmLazGynhSDfuGIwkzjcibFDuaCOsKoPauZopkPSiGmtoVexXKBANOjYHQhxU")
+# ⚠️ IMPORTANT: The python-zalo-bot library v0.1.9 hardcodes the LEGACY base URL
+# (https://bot-api.zapps.me) which returns 404 for getUpdates/getWebhookInfo.
+# We MUST override with the official URL https://bot-api.zaloplatforms.com
+ZALO_BASE_URL = os.environ.get("ZALO_BASE_URL", "https://bot-api.zaloplatforms.com")
 AI_CLOUD_URL = "https://mcp-hub-ai-cloud.vercel.app/api/chat"
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt"
 PORT = int(os.environ.get("PORT", 10000))
@@ -138,7 +142,7 @@ async def cmd_image(update: Update, context):
         await update.message.reply_text("🎨 Gõ: /image <mô tả ảnh>\nVD: /image con mèo trên mặt trăng")
         return
     prompt = " ".join(context.args)
-    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.UPLOAD_PHOTO)
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     try:
         url = make_image_url(prompt)
         await update.message.reply_photo(photo=url, caption=f'🎨 "{prompt}"\n\nPowered by Pollinations.ai')
@@ -181,7 +185,15 @@ async def on_message(update: Update, context):
 
 def init_bot():
     global bot_app
-    bot_app = ApplicationBuilder().token(ZALO_BOT_TOKEN).build()
+    bot_app = (
+        ApplicationBuilder()
+        .token(ZALO_BOT_TOKEN)
+        .base_url(ZALO_BASE_URL)  # ⚠️ MUST override legacy URL
+        .build()
+    )
+    # NOTE: Do NOT call bot.delete_webhook() here — it uses asyncio.run() which
+    # would close the event loop and break the httpx clients for the polling loop.
+    # The polling loop in _application.py handles bot.initialize() correctly.
     bot_app.add_handler(CommandHandler("start", cmd_start))
     bot_app.add_handler(CommandHandler("help", cmd_help))
     bot_app.add_handler(CommandHandler("image", cmd_image))
