@@ -1887,8 +1887,12 @@ async def cmd_tiktok(update: Update, context):
                 photo=cover,
                 caption="\n".join(caption_parts)
             )
+            stats["messages_sent"] += 1
+            log(f"✅ Cover photo sent")
         except Exception as e:
-            log(f"Cover send failed: {e}")
+            log(f"❌ Cover send failed: {e}")
+            import traceback
+            log(f"❌ Traceback: {traceback.format_exc()[:300]}")
     
     # Photo slides — send each image directly (this is what user wants!)
     if images:
@@ -2020,8 +2024,12 @@ async def cmd_ytdl(update: Update, context):
         if views:
             caption += f" | 👁️ {views:,}"
         await update.message.reply_photo(photo=thumbnail, caption=caption)
+        stats["messages_sent"] += 1
+        log(f"✅ YT thumbnail sent")
     except Exception as e:
-        log(f"Thumbnail send failed: {e}")
+        log(f"❌ YT thumbnail send failed: {e}")
+        import traceback
+        log(f"❌ Traceback: {traceback.format_exc()[:300]}")
     
     # Build text message with download links
     parts = [
@@ -2136,8 +2144,12 @@ async def cmd_ytmp3(update: Update, context):
             photo=thumbnail,
             caption=f"🎵 {title[:100]}\n👤 {author}"
         )
+        stats["messages_sent"] += 1
+        log(f"✅ YT MP3 thumbnail sent")
     except Exception as e:
-        log(f"Thumbnail send failed: {e}")
+        log(f"❌ YT MP3 thumbnail send failed: {e}")
+        import traceback
+        log(f"❌ Traceback: {traceback.format_exc()[:300]}")
     
     parts = [
         f"🎵 YOUTUBE → MP3",
@@ -2395,6 +2407,12 @@ def webhook():
     # Zalo wraps the update in `{"ok": true, "result": {...}}`
     payload = data.get("result", data) if isinstance(data, dict) else data
     
+    # Skip Zalo webhook test events (event_name="webhook.test")
+    event_name = payload.get("event_name") if isinstance(payload, dict) else None
+    if event_name == "webhook.test":
+        log("✅ Webhook test event received (ignoring)")
+        return jsonify({"ok": True})
+    
     if not bot_app:
         log("❌ bot_app not initialized")
         return jsonify({"ok": False, "error": "bot not initialized"})
@@ -2411,11 +2429,11 @@ def webhook():
             loop.run_until_complete(bot_app.bot.initialize())
         
         update = Update.de_json(payload, bot_app.bot)
-        if update is None:
-            log(f"❌ Update.de_json returned None for payload: {json.dumps(payload)[:200]}")
+        if update is None or update.message is None or update.message.chat is None:
+            log(f"❌ Invalid update (no message/chat): {json.dumps(payload)[:200]}")
             return jsonify({"ok": False, "error": "invalid update"})
         
-        log(f"✅ Processing update from chat_id={update.message.chat.id if update.message else '?'}")
+        log(f"✅ Processing update from chat_id={update.message.chat.id}")
         loop.run_until_complete(bot_app.process_update(update))
         loop.close()
         log("✅ Update processed")
