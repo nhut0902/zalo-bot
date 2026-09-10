@@ -2377,22 +2377,53 @@ def dashboard():
 def health():
     return jsonify({"status": "ok", "bot_id": ZALO_BOT_TOKEN.split(":")[0], "stats": stats})
 
+@app.route("/logs")
+def logs():
+    """View recent logs for debugging."""
+    return jsonify({
+        "logs": list(reversed(recent_logs)),
+        "stats": stats,
+        "cache_size": len(_cache),
+        "bot_initialized": bot_app.bot._initialized if bot_app else False,
+    })
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Zalo webhook endpoint (if configured)."""
+    """Zalo webhook endpoint."""
     data = request.json or {}
-    log(f"Webhook received: {json.dumps(data)[:200]}")
+    log(f"Webhook received: {json.dumps(data)[:300]}")
     # Zalo wraps the update in `{"ok": true, "result": {...}}`
     payload = data.get("result", data) if isinstance(data, dict) else data
-    if bot_app and payload:
-        try:
-            loop = asyncio.new_event_loop()
-            update = Update.de_json(payload, bot_app.bot)
-            loop.run_until_complete(bot_app.process_update(update))
-            loop.close()
-        except Exception as e:
-            log(f"Webhook error: {e}")
-            stats["errors"] += 1
+    
+    if not bot_app:
+        log("❌ bot_app not initialized")
+        return jsonify({"ok": False, "error": "bot not initialized"})
+    
+    if not payload:
+        log("❌ empty payload")
+        return jsonify({"ok": False, "error": "empty payload"})
+    
+    try:
+        loop = asyncio.new_event_loop()
+        # Ensure bot is initialized (needed for httpx client)
+        if not bot_app.bot._initialized:
+            log("🔧 Initializing bot...")
+            loop.run_until_complete(bot_app.bot.initialize())
+        
+        update = Update.de_json(payload, bot_app.bot)
+        if update is None:
+            log(f"❌ Update.de_json returned None for payload: {json.dumps(payload)[:200]}")
+            return jsonify({"ok": False, "error": "invalid update"})
+        
+        log(f"✅ Processing update from chat_id={update.message.chat.id if update.message else '?'}")
+        loop.run_until_complete(bot_app.process_update(update))
+        loop.close()
+        log("✅ Update processed")
+    except Exception as e:
+        import traceback
+        log(f"❌ Webhook error: {e}")
+        log(f"❌ Traceback: {traceback.format_exc()[:500]}")
+        stats["errors"] += 1
     return jsonify({"ok": True})
 
 
