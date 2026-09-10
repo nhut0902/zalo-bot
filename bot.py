@@ -619,7 +619,7 @@ async def cmd_start(update: Update, context):
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     await update.message.reply_text(
         f"🤖 Chào {name}!\n\nTôi là NhutBot trên Zalo.\n\n"
-        "📝 21 LỆNH:\n\n"
+        "📝 24 LỆNH:\n\n"
         "🤖 AI:\n"
         "• Nhắn tin → AI trả lời\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
@@ -630,6 +630,11 @@ async def cmd_start(update: Update, context):
         "• /wiki [lang] <query> → Wikipedia\n"
         "• /youtube <query> → Tìm video YouTube\n"
         "• /define <word> → Từ điển Anh\n\n"
+        "🎬 TẢI VIDEO/ẢNH (NO LOGO):\n"
+        "• /tiktok <url> → Tải TikTok không logo\n"
+        "• /tiktok <url> music → Tải nhạc TikTok\n"
+        "• /ytdl <url> → Tải video YouTube\n"
+        "• /ytmp3 <url> → YouTube sang MP3\n\n"
         "🛠️ Tiện ích:\n"
         "• /qr <text> → QR code\n"
         "• /shorten <url> → Rút gọn URL\n"
@@ -653,12 +658,19 @@ async def cmd_start(update: Update, context):
 
 async def cmd_help(update: Update, context):
     await update.message.reply_text(
-        "📋 HƯỚNG DẪN NhutBot v4 — 21 LỆNH\n\n"
+        "📋 HƯỚNG DẪN NhutBot v5 — 24 LỆNH\n\n"
         "🤖 AI & CHAT\n"
         "• Nhắn tin → AI trả lời thông minh\n"
         "• /image <mô tả> → Tạo ảnh AI (Pollinations)\n"
         "• /code <câu hỏi> → Hỏi về lập trình\n"
         "• /translate [lang] <text> → Dịch (gemini-1.5-flash)\n\n"
+        "🎬 TẢI VIDEO/ẢNH (NO LOGO)\n"
+        "• /tiktok <url> → Tải TikTok không logo\n"
+        "    VD: /tiktok https://www.tiktok.com/@user/video/123\n"
+        "• /tiktok <url> music → Tải nhạc TikTok\n"
+        "• /ytdl <url> → Tải video YouTube\n"
+        "    VD: /ytdl https://youtu.be/dQw4w9WgXcQ\n"
+        "• /ytmp3 <url> → YouTube sang MP3\n\n"
         "🔍 TÌM KIẾM & TRA CỨU\n"
         "• /search <từ khóa> → Tìm web (Tavily)\n"
         "• /wiki [vi|en] <query> → Wikipedia (FREE)\n"
@@ -1738,8 +1750,400 @@ async def cmd_youtube(update: Update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
         stats["errors"] += 1
-    
+
     stats["messages_sent"] += 1
+
+
+# ========== TIKTOK & YOUTUBE DOWNLOAD ==========
+
+TIKWM_API = "https://www.tikwm.com/api/"
+PIPED_API = "https://api.piped.private.coffee"
+
+def _is_tiktok_url(url: str) -> bool:
+    return "tiktok.com" in url.lower() or "vm.tiktok.com" in url.lower() or "vt.tiktok.com" in url.lower()
+
+def _is_youtube_url(url: str) -> bool:
+    return any(x in url.lower() for x in ("youtube.com", "youtu.be", "youtube-nocookie.com"))
+
+def _extract_video_id(url: str) -> str:
+    """Extract YouTube video ID from various URL formats."""
+    import re
+    patterns = [
+        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/|youtube-nocookie\.com/embed/)([A-Za-z0-9_-]{11})',
+        r'youtube\.com/v/([A-Za-z0-9_-]{11})',
+    ]
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def fetch_tiktok(url: str) -> dict:
+    """Fetch TikTok video/photo data via tikwm.com (FREE, no API key)."""
+    cache_key = f"tiktok:{url}"
+    cached = cache_get(cache_key, ttl_seconds=600)  # 10 min
+    if cached:
+        return cached
+    
+    try:
+        r = requests.post(
+            TIKWM_API,
+            data={"url": url, "hd": "1"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("code") != 0:
+            return {"error": f"tikwm: {data.get('msg', 'unknown error')}"}
+        result = data.get("data", {})
+        cache_set(cache_key, result)
+        return result
+    except Exception as e:
+        return {"error": f"Lỗi tải TikTok: {e}"}
+
+
+def fetch_youtube_streams(video_id: str) -> dict:
+    """Fetch YouTube stream URLs via Piped API (FREE, no API key)."""
+    cache_key = f"yt:{video_id}"
+    cached = cache_get(cache_key, ttl_seconds=1800)  # 30 min
+    if cached:
+        return cached
+    
+    try:
+        r = requests.get(
+            f"{PIPED_API}/streams/{video_id}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return {"error": f"Piped HTTP {r.status_code}"}
+        data = r.json()
+        cache_set(cache_key, data)
+        return data
+    except Exception as e:
+        return {"error": f"Lỗi tải YouTube: {e}"}
+
+
+async def cmd_tiktok(update: Update, context):
+    """Download TikTok video/photo/music without watermark — /tiktok <url> [music]"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎬 TẢI TIKTOK KHÔNG LOGO\n\n"
+            "Cách dùng:\n"
+            "• /tiktok <url> → Tải video không logo\n"
+            "• /tiktok <url> music → Tải nhạc\n"
+            "• /tiktok <url> info → Xem thông tin + link\n\n"
+            "Hỗ trợ:\n"
+            "✅ Video TikTok (no watermark)\n"
+            "✅ Ảnh slide (photo post)\n"
+            "✅ Âm thanh (MP3)\n\n"
+            "VD:\n"
+            "  /tiktok https://www.tiktok.com/@user/video/1234567890\n"
+            "  /tiktok https://vm.tiktok.com/ABCDEF/ music\n\n"
+            "📡 Nguồn: tikwm.com (FREE)"
+        )
+        return
+    
+    url = context.args[0]
+    mode = context.args[1].lower() if len(context.args) >= 2 else "video"
+    
+    if not _is_tiktok_url(url):
+        await update.message.reply_text("❌ URL không hợp lệ. Phải là link TikTok (tiktok.com hoặc vm.tiktok.com).")
+        stats["errors"] += 1
+        return
+    
+    await context.bot.send_chat_action(
+        chat_id=update.message.chat.id,
+        action=ChatAction.TYPING,
+    )
+    log(f"/tiktok: {url[:80]} (mode={mode})")
+    
+    data = fetch_tiktok(url)
+    if "error" in data:
+        await update.message.reply_text(f"❌ {data['error']}")
+        stats["errors"] += 1
+        return
+    
+    title = data.get("title", "Không có tiêu đề")[:200]
+    author = data.get("author", {}).get("nickname", "?")
+    cover = data.get("cover", "")
+    play_url = data.get("play", "")  # No watermark video
+    wm_url = data.get("wmplay", "")  # With watermark
+    music_url = data.get("music", "")
+    duration = data.get("duration", 0)
+    images = data.get("images", []) or []  # Photo slides
+    play_count = data.get("play_count", 0)
+    digg_count = data.get("digg_count", 0)
+    
+    # Build message
+    parts = [
+        f"🎬 TIKTOK",
+        f"{'─' * 30}",
+        f"👤 Tác giả: {author}",
+        f"📝 Tiêu đề: {title}",
+    ]
+    if duration > 0:
+        parts.append(f"⏱️ Thời lượng: {duration}s")
+    parts.append(f"👁️ Lượt xem: {play_count:,} | ❤️ {digg_count:,}")
+    parts.append("")
+    
+    # Photo slides
+    if images:
+        parts.append(f"🖼️ Photo slides ({len(images)} ảnh):")
+        for i, img in enumerate(images[:5], 1):
+            parts.append(f"  {i}. {img}")
+        if len(images) > 5:
+            parts.append(f"  ... và {len(images) - 5} ảnh nữa")
+    else:
+        # Video
+        if mode == "music" and music_url:
+            parts.append("🎵 LINK TẢI NHẠC (MP3):")
+            parts.append(music_url)
+        else:
+            parts.append("✅ LINK TẢI VIDEO KHÔNG LOGO:")
+            parts.append(play_url)
+            parts.append("")
+            if music_url:
+                parts.append(f"🎵 Nhạc: {music_url}")
+            if wm_url:
+                parts.append(f"ℹ️ Có logo: {wm_url}")
+    
+    parts.append("")
+    parts.append("💡 Tip: Mở link trên trình duyệt để tải về. Nếu bị 503, thêm header Referer: https://www.tikwm.com/")
+    parts.append("📡 Nguồn: tikwm.com")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "tiktok_count" not in stats:
+        stats["tiktok_count"] = 0
+    stats["tiktok_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 TikTok reply sent")
+
+
+async def cmd_ytdl(update: Update, context):
+    """Download YouTube video — /ytdl <url>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎬 TẢI VIDEO YOUTUBE\n\n"
+            "Cách dùng: /ytdl <url>\n\n"
+            "VD:\n"
+            "  /ytdl https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
+            "  /ytdl https://youtu.be/dQw4w9WgXcQ\n"
+            "  /ytdl https://www.youtube.com/shorts/VIDEO_ID\n\n"
+            "✅ Trả về: tiêu đề, tác giả, thumbnail + link tải\n"
+            "📡 Nguồn: Piped API + YouTube oEmbed"
+        )
+        return
+    
+    url = context.args[0]
+    video_id = _extract_video_id(url)
+    
+    if not video_id:
+        await update.message.reply_text("❌ URL YouTube không hợp lệ.")
+        stats["errors"] += 1
+        return
+    
+    await context.bot.send_chat_action(
+        chat_id=update.message.chat.id,
+        action=ChatAction.TYPING,
+    )
+    log(f"/ytdl: {video_id}")
+    
+    # Get metadata via oEmbed (always works)
+    try:
+        oembed_resp = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
+            timeout=10,
+        )
+        oembed = oembed_resp.json() if oembed_resp.status_code == 200 else {}
+    except Exception:
+        oembed = {}
+    
+    title = oembed.get("title", video_id)
+    author = oembed.get("author_name", "Unknown")
+    thumbnail = oembed.get("thumbnail_url", f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg")
+    
+    parts = [
+        f"🎬 YOUTUBE DOWNLOAD",
+        f"{'─' * 30}",
+        f"📝 Tiêu đề: {title[:200]}",
+        f"👤 Kênh: {author}",
+        f"🔗 URL: https://www.youtube.com/watch?v={video_id}",
+        f"🖼️ Thumbnail: {thumbnail}",
+        "",
+    ]
+    
+    # Try to get download URL via Piped
+    streams = fetch_youtube_streams(video_id)
+    
+    if "error" not in streams:
+        piped_title = streams.get("title", "")
+        if piped_title:
+            parts[2] = f"📝 Tiêu đề: {piped_title[:200]}"
+        duration = streams.get("duration", 0)
+        views = streams.get("views", 0)
+        if duration:
+            parts.append(f"⏱️ Thời lượng: {duration}s")
+        if views:
+            parts.append(f"👁️ Lượt xem: {views:,}")
+        parts.append("")
+        
+        # List available video streams
+        video_streams = streams.get("videoStreams") or []
+        audio_streams = streams.get("audioStreams") or []
+        
+        if video_streams:
+            parts.append("📥 LINK TẢI VIDEO:")
+            for vs in video_streams[:5]:
+                q = vs.get("quality", "?")
+                fmt = vs.get("format", "")
+                url_v = vs.get("url", "")
+                if url_v:
+                    parts.append(f"  • {q} ({fmt})")
+                    parts.append(f"    {url_v}")
+            parts.append("")
+        
+        if audio_streams:
+            parts.append("🎵 LINK TẢI AUDIO (MP3/MP4):")
+            for asr in audio_streams[:3]:
+                mime = asr.get("mimeType", "")[:40]
+                bitrate = asr.get("bitrate", 0) // 1000
+                url_a = asr.get("url", "")
+                if url_a:
+                    parts.append(f"  • {mime} ({bitrate}kbps)")
+                    parts.append(f"    {url_a}")
+            parts.append("")
+        
+        if not video_streams and not audio_streams:
+            parts.append("⚠️ Piped không trả được stream (có thể do YouTube chặn). Dùng link web dưới đây.")
+    else:
+        parts.append(f"⚠️ Piped: {streams['error']}")
+    
+    # Fallback: web downloaders
+    parts.append("🌐 WEB DOWNLOADERS (backup):")
+    parts.append(f"  • ssyoutube: https://ssyoutube.com/watch?v={video_id}")
+    parts.append(f"  • savefrom: https://en.savefrom.net/#url=https://www.youtube.com/watch?v={video_id}")
+    parts.append(f"  • y2mate: https://www.y2mate.com/youtube/{video_id}")
+    parts.append("")
+    parts.append("📡 Nguồn: Piped + YouTube oEmbed")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "ytdl_count" not in stats:
+        stats["ytdl_count"] = 0
+    stats["ytdl_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Ytdl reply sent")
+
+
+async def cmd_ytmp3(update: Update, context):
+    """YouTube to MP3 (audio only) — /ytmp3 <url>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎵 YOUTUBE → MP3\n\n"
+            "Cách dùng: /ytmp3 <url>\n\n"
+            "VD: /ytmp3 https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
+            "✅ Lấy link tải audio (MP3/M4A)\n"
+            "📡 Nguồn: Piped API"
+        )
+        return
+    
+    url = context.args[0]
+    video_id = _extract_video_id(url)
+    
+    if not video_id:
+        await update.message.reply_text("❌ URL YouTube không hợp lệ.")
+        stats["errors"] += 1
+        return
+    
+    await context.bot.send_chat_action(
+        chat_id=update.message.chat.id,
+        action=ChatAction.TYPING,
+    )
+    log(f"/ytmp3: {video_id}")
+    
+    # Get metadata via oEmbed
+    try:
+        oembed_resp = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
+            timeout=10,
+        )
+        oembed = oembed_resp.json() if oembed_resp.status_code == 200 else {}
+    except Exception:
+        oembed = {}
+    
+    title = oembed.get("title", video_id)
+    author = oembed.get("author_name", "Unknown")
+    
+    parts = [
+        f"🎵 YOUTUBE → MP3",
+        f"{'─' * 30}",
+        f"📝 Tiêu đề: {title[:200]}",
+        f"👤 Kênh: {author}",
+        "",
+    ]
+    
+    # Try Piped for audio streams
+    streams = fetch_youtube_streams(video_id)
+    
+    if "error" not in streams:
+        audio_streams = streams.get("audioStreams") or []
+        if audio_streams:
+            # Sort by bitrate (highest first)
+            audio_streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
+            parts.append("📥 LINK TẢI AUDIO:")
+            for asr in audio_streams[:3]:
+                mime = asr.get("mimeType", "")
+                bitrate = asr.get("bitrate", 0) // 1000
+                url_a = asr.get("url", "")
+                if url_a:
+                    parts.append(f"  • {bitrate}kbps | {mime[:40]}")
+                    parts.append(f"    {url_a}")
+            parts.append("")
+            parts.append("💡 Tip: M4A có chất lượng cao hơn MP3.")
+        else:
+            parts.append("⚠️ Piped không trả được audio streams (YouTube bot detection).")
+            parts.append("Dùng link web dưới đây:")
+            parts.append(f"  • y2mate: https://www.y2mate.com/youtube/mp3/{video_id}")
+            parts.append(f"  • ytmp3: https://ytmp3.cc/youtube-to-mp3/?url=https://www.youtube.com/watch?v={video_id}")
+    else:
+        parts.append(f"⚠️ Piped: {streams['error']}")
+        parts.append("Dùng link web:")
+        parts.append(f"  • y2mate: https://www.y2mate.com/youtube/mp3/{video_id}")
+    
+    parts.append("")
+    parts.append("📡 Nguồn: Piped + YouTube oEmbed")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "ytmp3_count" not in stats:
+        stats["ytmp3_count"] = 0
+    stats["ytmp3_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Ytmp3 reply sent")
 
 
 async def on_message(update: Update, context):
@@ -1795,6 +2199,9 @@ def init_bot():
     bot_app.add_handler(CommandHandler("base64", cmd_base64))
     bot_app.add_handler(CommandHandler("joke", cmd_joke))
     bot_app.add_handler(CommandHandler("youtube", cmd_youtube))
+    bot_app.add_handler(CommandHandler("tiktok", cmd_tiktok))
+    bot_app.add_handler(CommandHandler("ytdl", cmd_ytdl))
+    bot_app.add_handler(CommandHandler("ytmp3", cmd_ytmp3))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
@@ -1854,6 +2261,9 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="stat-card"><div class="stat-value">{{ stats.dict_count }}</div><div class="stat-label">Tra từ</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.url_count }}</div><div class="stat-label">Rút gọn</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.ip_count }}</div><div class="stat-label">Tra IP</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.tiktok_count }}</div><div class="stat-label">TikTok</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.ytdl_count }}</div><div class="stat-label">YT Video</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.ytmp3_count }}</div><div class="stat-label">YT MP3</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.joke_count }}</div><div class="stat-label">Joke</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.errors }}</div><div class="stat-label">Lỗi</div></div>
   </div>
@@ -1868,6 +2278,9 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="cmd-card"><code>/youtube &lt;q&gt;</code><p>Tìm video YouTube</p></div>
     <div class="cmd-card"><code>/define &lt;word&gt;</code><p>Từ điển Anh</p></div>
     <div class="cmd-card"><code>/translate [lang] &lt;txt&gt;</code><p>Dịch văn bản</p></div>
+    <div class="cmd-card"><code>/tiktok &lt;url&gt; [music]</code><p>Tải TikTok không logo</p></div>
+    <div class="cmd-card"><code>/ytdl &lt;url&gt;</code><p>Tải video YouTube</p></div>
+    <div class="cmd-card"><code>/ytmp3 &lt;url&gt;</code><p>YouTube → MP3</p></div>
     <div class="cmd-card"><code>/xoso &lt;số&gt; [tỉnh]</code><p>Dò vé số theo tỉnh</p></div>
     <div class="cmd-card"><code>/weather &lt;nơi&gt; [ngày]</code><p>Thời tiết (Open-Meteo)</p></div>
     <div class="cmd-card"><code>/currency &lt;amt&gt; &lt;f&gt; &lt;t&gt;</code><p>Đổi tiền tệ</p></div>
