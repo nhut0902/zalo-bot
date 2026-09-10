@@ -60,6 +60,24 @@ stats = {
     "yt_count": 0,
     "dict_count": 0,
     "joke_count": 0,
+    "tiktok_count": 0,
+    "ytdl_count": 0,
+    "ytmp3_count": 0,
+    "news_count": 0,
+    "github_count": 0,
+    "quote_count": 0,
+    "fact_count": 0,
+    "uuid_count": 0,
+    "hash_count": 0,
+    "color_count": 0,
+    "gold_count": 0,
+    "country_count": 0,
+    "tv_count": 0,
+    "binance_count": 0,
+    "binary_count": 0,
+    "horoscope_count": 0,
+    "reverse_count": 0,
+    "palindrome_count": 0,
     "errors": 0,
     "started_at": time.time(),
 }
@@ -619,7 +637,7 @@ async def cmd_start(update: Update, context):
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     await update.message.reply_text(
         f"🤖 Chào {name}!\n\nTôi là NhutBot trên Zalo.\n\n"
-        "📝 24 LỆNH:\n\n"
+        "📝 38 LỆNH:\n\n"
         "🤖 AI:\n"
         "• Nhắn tin → AI trả lời\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
@@ -627,30 +645,44 @@ async def cmd_start(update: Update, context):
         "• /translate [lang] <text> → Dịch\n\n"
         "🔍 Tìm kiếm:\n"
         "• /search <từ khóa> → Tìm web\n"
+        "• /news [chủ đề] → Tin tức\n"
         "• /wiki [lang] <query> → Wikipedia\n"
         "• /youtube <query> → Tìm video YouTube\n"
-        "• /define <word> → Từ điển Anh\n\n"
-        "🎬 TẢI VIDEO/ẢNH (NO LOGO):\n"
-        "• /tiktok <url> → Tải TikTok không logo\n"
-        "• /tiktok <url> music → Tải nhạc TikTok\n"
-        "• /ytdl <url> → Tải video YouTube\n"
+        "• /define <word> → Từ điển Anh\n"
+        "• /country <tên> → Quốc gia\n"
+        "• /tv <tên> → TV show\n"
+        "• /github <user> → GitHub profile\n\n"
+        "🎬 TẢI MEDIA (NO LOGO):\n"
+        "• /tiktok <url> → TikTok không logo\n"
+        "• /ytdl <url> → Video YouTube\n"
         "• /ytmp3 <url> → YouTube sang MP3\n\n"
-        "🛠️ Tiện ích:\n"
-        "• /qr <text> → QR code\n"
-        "• /shorten <url> → Rút gọn URL\n"
-        "• /base64 <enc|dec> <text> → Base64\n"
-        "• /password [length] → Sinh mật khẩu\n"
-        "• /ip [ip] → Tra IP\n\n"
         "💰 Tài chính:\n"
-        "• /currency <amt> <from> <to> → Đổi tiền\n"
-        "• /crypto <symbol> → Giá crypto\n\n"
+        "• /currency <amt> <f> <to> → Đổi tiền\n"
+        "• /crypto <symbol> → Giá crypto\n"
+        "• /binance <pair> → Binance ticker\n"
+        "• /gold → Giá vàng\n\n"
         "🎰 Xổ số:\n"
         "• /xoso <số> [tỉnh] → Dò vé số\n\n"
         "🌤️ Khác:\n"
         "• /weather <nơi> → Thời tiết\n"
         "• /calc <biểu thức> → Máy tính\n"
         "• /time [múi giờ] → Giờ\n"
-        "• /joke [cat] → Cười một phát\n\n"
+        "• /horoscope <sign> → Cung hoàng đạo\n"
+        "• /quote → Câu nói hay\n"
+        "• /fact → Fact ngẫu nhiên\n"
+        "• /joke [cat] → Cười\n\n"
+        "🛠️ Tiện ích:\n"
+        "• /qr <text> → QR code\n"
+        "• /shorten <url> → Rút gọn URL\n"
+        "• /base64 enc|dec <text>\n"
+        "• /binary <num> [base] → Convert base\n"
+        "• /password [length] → Sinh mật khẩu\n"
+        "• /hash <algo> <text> → MD5/SHA\n"
+        "• /uuid [count] → Sinh UUID\n"
+        "• /color <hex> → Thông tin màu\n"
+        "• /ip [ip] → Tra IP\n"
+        "• /reverse <text> → Đảo text\n"
+        "• /palindrome <text> → Check palindrome\n\n"
         "Gõ /help để xem chi tiết!"
     )
     stats["messages_sent"] += 1
@@ -658,46 +690,54 @@ async def cmd_start(update: Update, context):
 
 async def cmd_help(update: Update, context):
     await update.message.reply_text(
-        "📋 HƯỚNG DẪN NhutBot v5 — 24 LỆNH\n\n"
+        "📋 NhutBot v6 — 38 LỆNH\n\n"
         "🤖 AI & CHAT\n"
-        "• Nhắn tin → AI trả lời thông minh\n"
-        "• /image <mô tả> → Tạo ảnh AI (Pollinations)\n"
-        "• /code <câu hỏi> → Hỏi về lập trình\n"
-        "• /translate [lang] <text> → Dịch (gemini-1.5-flash)\n\n"
+        "• Nhắn tin → AI trả lời\n"
+        "• /image <mô tả> → Tạo ảnh AI\n"
+        "• /code <câu hỏi> → Hỏi code\n"
+        "• /translate [lang] <text> → Dịch\n\n"
         "🎬 TẢI VIDEO/ẢNH (NO LOGO)\n"
-        "• /tiktok <url> → Tải TikTok không logo\n"
-        "    VD: /tiktok https://www.tiktok.com/@user/video/123\n"
-        "• /tiktok <url> music → Tải nhạc TikTok\n"
-        "• /ytdl <url> → Tải video YouTube\n"
-        "    VD: /ytdl https://youtu.be/dQw4w9WgXcQ\n"
-        "• /ytmp3 <url> → YouTube sang MP3\n\n"
+        "• /tiktok <url> [music] → TikTok\n"
+        "• /ytdl <url> → YouTube video\n"
+        "• /ytmp3 <url> → YouTube MP3\n\n"
         "🔍 TÌM KIẾM & TRA CỨU\n"
-        "• /search <từ khóa> → Tìm web (Tavily)\n"
-        "• /wiki [vi|en] <query> → Wikipedia (FREE)\n"
-        "• /youtube <query> → Tìm video YouTube\n"
-        "• /define <word> → Từ điển Anh (FREE)\n\n"
-        "🛠️ TIỆN ÍCH\n"
-        "• /qr <text> → Tạo QR code (quickchart.io)\n"
-        "• /shorten <url> → Rút gọn URL (is.gd, FREE)\n"
-        "• /base64 enc|dec <text> → Base64 encode/decode\n"
-        "• /password [length] [count] → Sinh mật khẩu mạnh\n"
-        "• /ip [ip] → Tra thông tin IP (ip-api.com)\n\n"
+        "• /search <từ khóa> → Tìm web\n"
+        "• /news [chủ đề] → Tin tức\n"
+        "• /wiki [vi|en] <query> → Wikipedia\n"
+        "• /youtube <query> → Tìm YouTube\n"
+        "• /define <word> → Từ điển Anh\n"
+        "• /country <tên> → Quốc gia (Wiki)\n"
+        "• /tv <tên> → TV show (TVMaze)\n"
+        "• /github <user> → GitHub profile\n\n"
         "💰 TÀI CHÍNH\n"
-        "• /currency <amount> <from> <to> → Đổi tiền (FREE)\n"
-        "    VD: /currency 100 USD VND\n"
-        "• /crypto <symbol> → Giá crypto (CoinGecko)\n"
-        "    VD: /crypto bitcoin ethereum solana\n\n"
+        "• /currency <amt> <from> <to> → Đổi tiền\n"
+        "• /crypto <symbol> → Crypto (CoinGecko)\n"
+        "• /binance <pair> → Binance ticker\n"
+        "• /gold → Giá vàng (USD/VND)\n\n"
         "🎰 XỔ SỐ\n"
-        "• /xoso <số> [tỉnh] [date] → Dò vé số\n"
-        "    VD: /xoso 94504 hcm\n"
-        "    VD: /xoso 94504 mb 08-09-2026\n\n"
+        "• /xoso <số> [tỉnh] → Dò vé số\n\n"
         "🌤️ KHÁC\n"
-        "• /weather <nơi> [số ngày] → Thời tiết (Open-Meteo)\n"
-        "• /calc <biểu thức> → Máy tính khoa học\n"
-        "• /time [múi giờ] → Giờ hiện tại\n"
-        "• /joke [cat] → Câu nói vui (JokeAPI)\n\n"
-        "💡 Nhắn tự nhiên, AI hiểu tiếng Việt!\n"
-        "📊 Dashboard: https://zalo-bot-three.vercel.app/"
+        "• /weather <nơi> [ngày] → Thời tiết\n"
+        "• /calc <biểu thức> → Máy tính\n"
+        "• /time [múi giờ] → Giờ\n"
+        "• /horoscope <sign> → Cung hoàng đạo\n"
+        "• /quote → Câu nói hay\n"
+        "• /fact → Fact ngẫu nhiên\n"
+        "• /joke [cat] → Cười\n\n"
+        "🛠️ TIỆN ÍCH\n"
+        "• /qr <text> → QR code\n"
+        "• /shorten <url> → Rút gọn URL\n"
+        "• /base64 enc|dec <text> → Base64\n"
+        "• /binary <num> [base] → Convert base\n"
+        "• /password [length] → Sinh mật khẩu\n"
+        "• /hash <algo> <text> → MD5/SHA1/SHA256\n"
+        "• /uuid [count] → Sinh UUID v4\n"
+        "• /color <hex> → Info màu + preview\n"
+        "• /ip [ip] → Tra IP\n"
+        "• /reverse <text> → Đảo text\n"
+        "• /palindrome <text> → Check palindrome\n\n"
+        "📊 Dashboard: https://zalo-bot-three.vercel.app/\n"
+        "📋 Logs: https://zalo-bot-three.vercel.app/logs"
     )
     stats["messages_sent"] += 1
 
@@ -2205,6 +2245,871 @@ async def cmd_ytmp3(update: Update, context):
     log(f"🤖 Ytmp3 reply sent")
 
 
+# ========== 12 NEW UTILITY COMMANDS (v6) ==========
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+
+async def cmd_news(update: Update, context):
+    """Latest news — /news [topic]"""
+    if not context.args:
+        topic = "Vietnam"
+    else:
+        topic = " ".join(context.args)
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/news: {topic}")
+    
+    # Use Tavily with news topic
+    result = search_web(f"{topic} latest news today", max_results=5)
+    if "news_count" not in stats:
+        stats["news_count"] = 0
+    stats["news_count"] += 1
+    
+    parts = [f"📰 TIN TỨC: {topic}", "─" * 30, ""]
+    if result.get("answer"):
+        parts.append("💡 Tóm tắt:")
+        parts.append(result["answer"][:600])
+        parts.append("")
+    
+    if result.get("results"):
+        parts.append("📎 Bài viết:")
+        for i, item in enumerate(result["results"][:5], 1):
+            title = item.get("title", "N/A")[:80]
+            url = item.get("url", "")
+            snippet = (item.get("content") or "")[:120].replace("\n", " ")
+            parts.append(f"\n{i}. {title}")
+            if snippet:
+                parts.append(f"   {snippet}...")
+            if url:
+                parts.append(f"   🔗 {url}")
+    
+    parts.append("")
+    parts.append("📡 Nguồn: Tavily search")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    stats["messages_sent"] += 1
+    log(f"🤖 News reply sent")
+
+
+async def cmd_github(update: Update, context):
+    """GitHub user info — /github <username>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🐱 GITHUB USER INFO\n\n"
+            "Cách dùng: /github <username>\n\n"
+            "VD: /github torvalds, /github nhut0902\n"
+            "📡 Nguồn: GitHub REST API"
+        )
+        return
+    
+    username = context.args[0].strip().lstrip("@")
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/github: {username}")
+    
+    cache_key = f"github:{username}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if not cached:
+        try:
+            r = requests.get(
+                f"https://api.github.com/users/{username}",
+                headers={
+                    "Authorization": f"token {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "Mozilla/5.0",
+                },
+                timeout=10,
+            )
+            if r.status_code == 404:
+                await update.message.reply_text(f"❌ Không tìm thấy user '{username}' trên GitHub")
+                stats["errors"] += 1
+                return
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    parts = [
+        f"🐱 GITHUB USER",
+        f"{'─' * 30}",
+        f"👤 {cached.get('name') or cached.get('login','?')} (@{cached.get('login','?')})",
+    ]
+    if cached.get('bio'):
+        parts.append(f"📝 Bio: {cached['bio'][:200]}")
+    if cached.get('company'):
+        parts.append(f"🏢 Company: {cached['company']}")
+    if cached.get('location'):
+        parts.append(f"📍 Location: {cached['location']}")
+    if cached.get('blog'):
+        parts.append(f"🔗 Blog: {cached['blog']}")
+    parts.append("")
+    parts.append(f"📊 Stats:")
+    parts.append(f"  • Followers: {cached.get('followers',0):,}")
+    parts.append(f"  • Following: {cached.get('following',0):,}")
+    parts.append(f"  • Public repos: {cached.get('public_repos',0):,}")
+    parts.append(f"  • Public gists: {cached.get('public_gists',0):,}")
+    parts.append(f"  • Created: {cached.get('created_at','?')[:10]}")
+    parts.append("")
+    parts.append(f"🖼️ Avatar: {cached.get('avatar_url','')}")
+    parts.append(f"🌐 Profile: https://github.com/{cached.get('login','')}")
+    parts.append("")
+    parts.append("📡 Nguồn: GitHub REST API")
+    
+    # Send avatar as photo if available
+    avatar = cached.get('avatar_url', '')
+    if avatar:
+        try:
+            await update.message.reply_photo(photo=avatar, caption=f"🖼️ Avatar of @{cached.get('login','?')}")
+            stats["messages_sent"] += 1
+        except Exception as e:
+            log(f"Avatar send failed: {e}")
+    
+    msg = "\n".join(parts)
+    await update.message.reply_text(msg)
+    
+    if "github_count" not in stats:
+        stats["github_count"] = 0
+    stats["github_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 GitHub reply sent")
+
+
+async def cmd_quote(update: Update, context):
+    """Random inspirational quote — /quote"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/quote")
+    
+    cache_key = "quote:latest"
+    cached = cache_get(cache_key, ttl_seconds=60)  # very short, just to avoid spam
+    if not cached:
+        try:
+            r = requests.get("https://zenquotes.io/api/random", timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list) and data:
+                cached = data[0]
+                cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    quote_text = cached.get('q', 'Live and let live.')
+    author = cached.get('a', 'Unknown')
+    
+    msg = (
+        f"💬 QUOTE\n"
+        f"{'─' * 30}\n\n"
+        f"\"{quote_text}\"\n\n"
+        f"— {author}\n"
+        f"{'─' * 30}\n"
+        f"📡 Nguồn: zenquotes.io"
+    )
+    await update.message.reply_text(msg)
+    
+    if "quote_count" not in stats:
+        stats["quote_count"] = 0
+    stats["quote_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Quote reply sent")
+
+
+async def cmd_fact(update: Update, context):
+    """Random useless fact — /fact"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/fact")
+    
+    cache_key = "fact:latest"
+    cached = cache_get(cache_key, ttl_seconds=60)
+    if not cached:
+        try:
+            r = requests.get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=en", timeout=10)
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    fact = cached.get('text', 'No fact today.')
+    
+    msg = (
+        f"🧠 RANDOM FACT\n"
+        f"{'─' * 30}\n\n"
+        f"{fact}\n\n"
+        f"📡 Nguồn: uselessfacts.jsph.pl"
+    )
+    await update.message.reply_text(msg)
+    
+    if "fact_count" not in stats:
+        stats["fact_count"] = 0
+    stats["fact_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Fact reply sent")
+
+
+async def cmd_uuid(update: Update, context):
+    """Generate UUID — /uuid [count]"""
+    import uuid as uuid_module
+    count = 1
+    if context.args:
+        try:
+            count = int(context.args[0])
+            if count < 1: count = 1
+            if count > 20: count = 20
+        except ValueError:
+            pass
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/uuid: count={count}")
+    
+    parts = [
+        f"🆔 UUID v4",
+        f"{'─' * 30}",
+    ]
+    for i in range(count):
+        parts.append(f"{i+1}. `{uuid_module.uuid4()}`")
+    
+    parts.append("")
+    parts.append("✨ UUID4 cryptographically secure (RFC 4122)")
+    
+    await update.message.reply_text("\n".join(parts))
+    
+    if "uuid_count" not in stats:
+        stats["uuid_count"] = 0
+    stats["uuid_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 UUID reply sent")
+
+
+async def cmd_hash(update: Update, context):
+    """Hash text — /hash <algo> <text>"""
+    import hashlib
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "🔐 HASH\n\n"
+            "Cách dùng: /hash <algo> <text>\n\n"
+            "Algorithms: md5, sha1, sha224, sha256, sha384, sha512\n\n"
+            "VD:\n"
+            "  /hash md5 hello\n"
+            "  /hash sha256 secret\n"
+            "  /hash sha512 password"
+        )
+        return
+    
+    algo = context.args[0].lower()
+    text = " ".join(context.args[1:])
+    
+    supported = ["md5", "sha1", "sha224", "sha256", "sha384", "sha512"]
+    if algo not in supported:
+        await update.message.reply_text(f"❌ Algo '{algo}' không hỗ trợ. Dùng: {', '.join(supported)}")
+        stats["errors"] += 1
+        return
+    
+    try:
+        h = hashlib.new(algo)
+        h.update(text.encode('utf-8'))
+        result = h.hexdigest()
+        
+        await update.message.reply_text(
+            f"🔐 HASH\n"
+            f"{'─' * 30}\n"
+            f"📝 Input: {text[:200]}\n"
+            f"🔑 Algorithm: {algo.upper()}\n"
+            f"{'─' * 30}\n"
+            f"✅ Hash: `{result}`"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi hash: {e}")
+        stats["errors"] += 1
+    
+    if "hash_count" not in stats:
+        stats["hash_count"] = 0
+    stats["hash_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Hash reply sent")
+
+
+async def cmd_color(update: Update, context):
+    """Color info from hex — /color <hex>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎨 COLOR INFO\n\n"
+            "Cách dùng: /color <hex>\n\n"
+            "VD: /color ff5733, /color #3498db\n"
+            "✅ Trả về: RGB, HSL, preview URL"
+        )
+        return
+    
+    hex_color = context.args[0].lstrip("#").strip()
+    if not re.match(r'^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$', hex_color):
+        await update.message.reply_text("❌ Hex color không hợp lệ. VD: ff5733, #3498db")
+        stats["errors"] += 1
+        return
+    
+    # Expand 3-char to 6-char
+    if len(hex_color) == 3:
+        hex_color = "".join(c*2 for c in hex_color)
+    
+    # Parse to RGB
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    
+    # Convert to HSL
+    r_n, g_n, b_n = r/255, g/255, b/255
+    mx, mn = max(r_n, g_n, b_n), min(r_n, g_n, b_n)
+    l = (mx + mn) / 2
+    if mx == mn:
+        h = s = 0
+    else:
+        d = mx - mn
+        s = d / (2 - mx - mn) if l > 0.5 else d / (mx + mn)
+        if mx == r_n:
+            h = ((g_n - b_n) / d + (6 if g_n < b_n else 0)) / 6
+        elif mx == g_n:
+            h = ((b_n - r_n) / d + 2) / 6
+        else:
+            h = ((r_n - g_n) / d + 4) / 6
+    h, s, l = int(h*360), int(s*100), int(l*100)
+    
+    # Color name (rough)
+    color_names = {
+        (0, 0, 0): "Đen", (255, 255, 255): "Trắng",
+        (255, 0, 0): "Đỏ", (0, 255, 0): "Xanh lá", (0, 0, 255): "Xanh dương",
+        (255, 255, 0): "Vàng", (255, 0, 255): "Hồng tím", (0, 255, 255): "Lam",
+    }
+    name = "Tùy chỉnh"
+    min_dist = 1000
+    for (cr, cg, cb), n in color_names.items():
+        dist = abs(r-cr) + abs(g-cg) + abs(b-cb)
+        if dist < min_dist:
+            min_dist = dist
+            name = n
+    
+    preview_url = f"https://via.placeholder.com/200x200/{hex_color}/ffffff?text=#{hex_color.upper()}"
+    
+    parts = [
+        f"🎨 COLOR INFO",
+        f"{'─' * 30}",
+        f"🏷️ Hex: #{hex_color.upper()}",
+        f"📊 RGB: rgb({r}, {g}, {b})",
+        f"🌈 HSL: hsl({h}, {s}%, {l}%)",
+        f"🎨 Tên: {name}",
+        f"🖼️ Preview: {preview_url}",
+        "",
+        f"💡 CSS: `#{hex_color}`",
+    ]
+    
+    # Send preview as photo
+    try:
+        await update.message.reply_photo(
+            photo=preview_url,
+            caption=f"🎨 Preview #{hex_color.upper()}"
+        )
+        stats["messages_sent"] += 1
+    except Exception as e:
+        log(f"Color preview failed: {e}")
+    
+    await update.message.reply_text("\n".join(parts))
+    
+    if "color_count" not in stats:
+        stats["color_count"] = 0
+    stats["color_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Color reply sent")
+
+
+async def cmd_gold(update: Update, context):
+    """Gold price — /gold"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/gold")
+    
+    cache_key = "gold:latest"
+    cached = cache_get(cache_key, ttl_seconds=300)
+    if not cached:
+        try:
+            r = requests.get("https://api.gold-api.com/price/XAU", timeout=10)
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi tải giá vàng: {e}")
+            stats["errors"] += 1
+            return
+    
+    price_usd = cached.get('price', 0)
+    # Convert to VND (approximate)
+    try:
+        vnd_rate = 25850  # fallback USD/VND
+        r_vnd = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
+        if r_vnd.status_code == 200:
+            vnd_rate = r_vnd.json().get('rates', {}).get('VND', vnd_rate)
+    except Exception:
+        pass
+    price_vnd = price_usd * vnd_rate / 31.1035  # per gram
+    
+    parts = [
+        f"💰 GIÁ VÀNG HÔM NAY",
+        f"{'─' * 30}",
+        f"🥇 1 oz vàng (XAU):",
+        f"  💵 ${price_usd:,.2f} USD",
+        f"  💱 ~{price_vnd:,.0f} VND/gram",
+        f"  💱 Tỷ giá USD/VND: {vnd_rate:,.0f}",
+        f"",
+        f"🕐 Cập nhật: {cached.get('updatedAt','?')[:19]}",
+        f"📡 Nguồn: gold-api.com + open.er-api.com",
+    ]
+    
+    await update.message.reply_text("\n".join(parts))
+    
+    if "gold_count" not in stats:
+        stats["gold_count"] = 0
+    stats["gold_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Gold reply sent")
+
+
+async def cmd_country(update: Update, context):
+    """Country info — /country <name>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🌍 COUNTRY INFO\n\n"
+            "Cách dùng: /country <name>\n\n"
+            "VD: /country Vietnam, /country Japan, /country France\n"
+            "📡 Nguồn: Wikipedia REST API"
+        )
+        return
+    
+    country = " ".join(context.args)
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/country: {country}")
+    
+    cache_key = f"country:{country.lower()}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if not cached:
+        try:
+            r = requests.get(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(country)}",
+                headers={
+                    "User-Agent": "NhutBot/1.0 (https://zalo-bot-three.vercel.app)",
+                    "Accept": "application/json",
+                },
+                timeout=15,
+            )
+            if r.status_code == 404:
+                await update.message.reply_text(f"❌ Không tìm thấy quốc gia '{country}'")
+                stats["errors"] += 1
+                return
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    title = cached.get('title', country)
+    extract = cached.get('extract', '')[:1200]
+    thumbnail = cached.get('thumbnail', {}).get('source', '')
+    page_url = (cached.get('content_urls', {}).get('desktop', {}) or {}).get('page', '')
+    
+    # Send thumbnail as photo first
+    if thumbnail:
+        try:
+            await update.message.reply_photo(
+                photo=thumbnail,
+                caption=f"🌍 {title}"
+            )
+            stats["messages_sent"] += 1
+        except Exception as e:
+            log(f"Country thumbnail failed: {e}")
+    
+    parts = [
+        f"🌍 COUNTRY INFO",
+        f"{'─' * 30}",
+        f"🏷️ {title}",
+        "",
+        extract,
+    ]
+    if page_url:
+        parts.append("")
+        parts.append(f"🔗 {page_url}")
+    parts.append("")
+    parts.append("📡 Nguồn: Wikipedia REST API")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "country_count" not in stats:
+        stats["country_count"] = 0
+    stats["country_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Country reply sent")
+
+
+async def cmd_tv(update: Update, context):
+    """TV show info — /tv <name>"""
+    if not context.args:
+        await update.message.reply_text(
+            "📺 TV SHOW INFO\n\n"
+            "Cách dùng: /tv <name>\n\n"
+            "VD: /tv Breaking Bad, /tv Wednesday, /tv Stranger Things\n"
+            "📡 Nguồn: TVMaze API"
+        )
+        return
+    
+    query = " ".join(context.args)
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/tv: {query}")
+    
+    cache_key = f"tv:{query.lower()}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if not cached:
+        try:
+            r = requests.get(
+                "https://api.tvmaze.com/singlesearch/shows",
+                params={"q": query},
+                timeout=10,
+            )
+            if r.status_code == 404:
+                await update.message.reply_text(f"❌ Không tìm thấy TV show '{query}'")
+                stats["errors"] += 1
+                return
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    name = cached.get('name', '?')
+    premiered = cached.get('premiered', '?')
+    ended = cached.get('ended', '')
+    status = cached.get('status', '?')
+    rating = (cached.get('rating') or {}).get('average', 'N/A')
+    genres = cached.get('genres', [])
+    network = (cached.get('network') or {}).get('name') or (cached.get('webChannel') or {}).get('name', 'N/A')
+    summary = re.sub(r'<[^>]+>', '', cached.get('summary', '') or '')[:400]
+    image = (cached.get('image') or {}).get('original') or (cached.get('image') or {}).get('medium', '')
+    language = cached.get('language', 'N/A')
+    runtime = cached.get('runtime', 0)
+    
+    # Send image as photo first
+    if image:
+        try:
+            await update.message.reply_photo(photo=image, caption=f"📺 {name}")
+            stats["messages_sent"] += 1
+        except Exception as e:
+            log(f"TV image failed: {e}")
+    
+    parts = [
+        f"📺 TV SHOW INFO",
+        f"{'─' * 30}",
+        f"🎬 {name}",
+        f"📅 Premiered: {premiered}" + (f" → Ended: {ended}" if ended else ""),
+        f"📊 Status: {status}",
+        f"🌐 Language: {language}",
+        f"⏱️ Runtime: {runtime} min" if runtime else "",
+        f"⭐ Rating: {rating}/10",
+        f"🎭 Genres: {', '.join(genres) if genres else 'N/A'}",
+        f"📡 Network: {network}",
+        "",
+        summary,
+        "",
+        f"🔗 https://www.tvmaze.com/shows/{cached.get('id','')}",
+        f"📡 Nguồn: TVMaze API",
+    ]
+    parts = [p for p in parts if p != ""]
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "tv_count" not in stats:
+        stats["tv_count"] = 0
+    stats["tv_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 TV reply sent")
+
+
+async def cmd_binance(update: Update, context):
+    """Binance ticker — /binance <pair>"""
+    if not context.args:
+        await update.message.reply_text(
+            "📈 BINANCE TICKER\n\n"
+            "Cách dùng: /binance <pair>\n\n"
+            "VD:\n"
+            "  /binance BTCUSDT\n"
+            "  /binance ETHUSDT\n"
+            "  /binance BNBUSDT\n"
+            "  /binance SOLUSDT\n\n"
+            "📡 Nguồn: Binance API (FREE)"
+        )
+        return
+    
+    symbol = context.args[0].upper()
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/binance: {symbol}")
+    
+    cache_key = f"binance:{symbol}"
+    cached = cache_get(cache_key, ttl_seconds=30)  # 30 sec
+    if not cached:
+        try:
+            r = requests.get(
+                f"https://api.binance.com/api/v3/ticker/24hr",
+                params={"symbol": symbol},
+                timeout=10,
+            )
+            if r.status_code == 400:
+                await update.message.reply_text(f"❌ Symbol '{symbol}' không hợp lệ")
+                stats["errors"] += 1
+                return
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    parts = [
+        f"📈 BINANCE TICKER",
+        f"{'─' * 30}",
+        f"🔢 Symbol: {cached.get('symbol','?')}",
+        f"💵 Last price: ${float(cached.get('lastPrice',0)):,.4f}",
+        f"📊 24h change: {cached.get('priceChangePercent','?')}%",
+        f"📈 24h high: ${float(cached.get('highPrice',0)):,.4f}",
+        f"📉 24h low: ${float(cached.get('lowPrice',0)):,.4f}",
+        f"💰 Volume: {float(cached.get('quoteVolume',0)):,.0f} USDT",
+        f"{'─' * 30}",
+        f"📡 Nguồn: Binance API",
+    ]
+    
+    await update.message.reply_text("\n".join(parts))
+    
+    if "binance_count" not in stats:
+        stats["binance_count"] = 0
+    stats["binance_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Binance reply sent")
+
+
+async def cmd_binary(update: Update, context):
+    """Number base converter — /binary <number> [from_base]"""
+    if not context.args:
+        await update.message.reply_text(
+            "🔢 NUMBER BASE CONVERTER\n\n"
+            "Cách dùng: /binary <number> [from_base]\n\n"
+            "Bases: 2 (binary), 8 (octal), 10 (decimal), 16 (hex)\n\n"
+            "VD:\n"
+            "  /binary 255 → convert decimal 255\n"
+            "  /binary 1010 2 → convert binary 1010\n"
+            "  /binary ff 16 → convert hex ff\n"
+            "  /binary 777 8 → convert octal 777"
+        )
+        return
+    
+    num_str = context.args[0]
+    from_base = int(context.args[1]) if len(context.args) >= 2 else 10
+    
+    if from_base not in (2, 8, 10, 16):
+        await update.message.reply_text("❌ Base phải là 2, 8, 10, hoặc 16")
+        stats["errors"] += 1
+        return
+    
+    try:
+        # Parse the number
+        decimal_value = int(num_str, from_base)
+        
+        parts = [
+            f"🔢 NUMBER BASE CONVERTER",
+            f"{'─' * 30}",
+            f"📝 Input: {num_str} (base {from_base})",
+            f"{'─' * 30}",
+            f"🔟 Decimal: {decimal_value}",
+            f"2️⃣ Binary: {bin(decimal_value)[2:]}",
+            f"8️⃣ Octal: {oct(decimal_value)[2:]}",
+            f"🔟 Hex: {hex(decimal_value).upper()[2:]}",
+            f"{'─' * 30}",
+            f"💡 Cách dùng: /binary <number> [base]",
+        ]
+        
+        await update.message.reply_text("\n".join(parts))
+    except ValueError as e:
+        await update.message.reply_text(f"❌ Không thể parse '{num_str}' ở base {from_base}: {e}")
+        stats["errors"] += 1
+        return
+    
+    if "binary_count" not in stats:
+        stats["binary_count"] = 0
+    stats["binary_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Binary reply sent")
+
+
+async def cmd_horoscope(update: Update, context):
+    """Daily horoscope — /horoscope <sign>"""
+    if not context.args:
+        await update.message.reply_text(
+            "♈ DAILY HOROSCOPE\n\n"
+            "Cách dùng: /horoscope <sign>\n\n"
+            "Signs:\n"
+            "♈ Aries, ♉ Taurus, ♊ Gemini, ♋ Cancer\n"
+            "♌ Leo, ♍ Virgo, ♎ Libra, ♏ Scorpio\n"
+            "♐ Sagittarius, ♑ Capricorn, ♒ Aquarius, ♓ Pisces\n\n"
+            "VD: /horoscope aries, /horoscope leo"
+        )
+        return
+    
+    sign = context.args[0].lower()
+    valid_signs = ["aries", "taurus", "gemini", "cancer", "leo", "virgo",
+                   "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"]
+    if sign not in valid_signs:
+        await update.message.reply_text(f"❌ Sign '{sign}' không hợp lệ. Dùng: {', '.join(valid_signs)}")
+        stats["errors"] += 1
+        return
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/horoscope: {sign}")
+    
+    cache_key = f"horoscope:{sign}:{datetime.datetime.now().strftime('%Y-%m-%d')}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if not cached:
+        try:
+            r = requests.get(
+                "https://horoscope-app-api.vercel.app/api/v1/get-horoscope/daily",
+                params={"sign": sign, "day": "TODAY"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            cached = r.json().get('data', {})
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    sign_emojis = {
+        "aries": "♈", "taurus": "♉", "gemini": "♊", "cancer": "♋",
+        "leo": "♌", "virgo": "♍", "libra": "♎", "scorpio": "♏",
+        "sagittarius": "♐", "capricorn": "♑", "aquarius": "♒", "pisces": "♓",
+    }
+    emoji = sign_emojis.get(sign, "🔮")
+    horoscope_text = cached.get('horoscope', 'No horoscope today.')
+    date = cached.get('date', '?')
+    
+    msg = (
+        f"{emoji} HOROSCOPE — {sign.upper()}\n"
+        f"{'─' * 30}\n"
+        f"📅 {date}\n"
+        f"{'─' * 30}\n\n"
+        f"{horoscope_text}\n\n"
+        f"📡 Nguồn: horoscope-app-api"
+    )
+    
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "horoscope_count" not in stats:
+        stats["horoscope_count"] = 0
+    stats["horoscope_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Horoscope reply sent")
+
+
+async def cmd_reverse(update: Update, context):
+    """Reverse text — /reverse <text>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🔄 REVERSE TEXT\n\n"
+            "Cách dùng: /reverse <text>\n\n"
+            "VD: /reverse Hello World → dlroW olleH"
+        )
+        return
+    
+    text = " ".join(context.args)
+    reversed_text = text[::-1]
+    
+    await update.message.reply_text(
+        f"🔄 REVERSE TEXT\n"
+        f"{'─' * 30}\n"
+        f"📝 Input: {text[:500]}\n"
+        f"✅ Reversed: {reversed_text[:500]}"
+    )
+    
+    if "reverse_count" not in stats:
+        stats["reverse_count"] = 0
+    stats["reverse_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Reverse reply sent")
+
+
+async def cmd_palindrome(update: Update, context):
+    """Check palindrome — /palindrome <text>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🪞 PALINDROME CHECKER\n\n"
+            "Cách dùng: /palindrome <text>\n\n"
+            "VD: /palindrome racecar, /palindrome madam\n"
+            "VD: /palindrome Anna — not case-sensitive, ignores spaces"
+        )
+        return
+    
+    text = " ".join(context.args)
+    # Normalize: lowercase, remove non-alphanumeric
+    normalized = re.sub(r'[^a-z0-9]', '', text.lower())
+    reversed_norm = normalized[::-1]
+    
+    is_palindrome = normalized == reversed_norm and len(normalized) > 0
+    
+    if is_palindrome:
+        result_text = "✅ LÀ PALINDROME"
+    else:
+        result_text = "❌ KHÔNG PHẢI PALINDROME"
+    
+    await update.message.reply_text(
+        f"🪞 PALINDROME CHECK\n"
+        f"{'─' * 30}\n"
+        f"📝 Input: {text[:500]}\n"
+        f"🔧 Normalized: {normalized[:500]}\n"
+        f"🔄 Reversed: {reversed_norm[:500]}\n"
+        f"{'─' * 30}\n"
+        f"{result_text}"
+    )
+    
+    if "palindrome_count" not in stats:
+        stats["palindrome_count"] = 0
+    stats["palindrome_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Palindrome reply sent")
+
+
 async def on_message(update: Update, context):
     stats["messages_received"] += 1
     msg = update.message.text
@@ -2261,6 +3166,22 @@ def init_bot():
     bot_app.add_handler(CommandHandler("tiktok", cmd_tiktok))
     bot_app.add_handler(CommandHandler("ytdl", cmd_ytdl))
     bot_app.add_handler(CommandHandler("ytmp3", cmd_ytmp3))
+    # 14 new commands (v6)
+    bot_app.add_handler(CommandHandler("news", cmd_news))
+    bot_app.add_handler(CommandHandler("github", cmd_github))
+    bot_app.add_handler(CommandHandler("quote", cmd_quote))
+    bot_app.add_handler(CommandHandler("fact", cmd_fact))
+    bot_app.add_handler(CommandHandler("uuid", cmd_uuid))
+    bot_app.add_handler(CommandHandler("hash", cmd_hash))
+    bot_app.add_handler(CommandHandler("color", cmd_color))
+    bot_app.add_handler(CommandHandler("gold", cmd_gold))
+    bot_app.add_handler(CommandHandler("country", cmd_country))
+    bot_app.add_handler(CommandHandler("tv", cmd_tv))
+    bot_app.add_handler(CommandHandler("binance", cmd_binance))
+    bot_app.add_handler(CommandHandler("binary", cmd_binary))
+    bot_app.add_handler(CommandHandler("horoscope", cmd_horoscope))
+    bot_app.add_handler(CommandHandler("reverse", cmd_reverse))
+    bot_app.add_handler(CommandHandler("palindrome", cmd_palindrome))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
@@ -2323,6 +3244,15 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="stat-card"><div class="stat-value">{{ stats.tiktok_count }}</div><div class="stat-label">TikTok</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.ytdl_count }}</div><div class="stat-label">YT Video</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.ytmp3_count }}</div><div class="stat-label">YT MP3</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.news_count }}</div><div class="stat-label">Tin tức</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.github_count }}</div><div class="stat-label">GitHub</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.country_count }}</div><div class="stat-label">Quốc gia</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.tv_count }}</div><div class="stat-label">TV Show</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.gold_count }}</div><div class="stat-label">Giá vàng</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.binance_count }}</div><div class="stat-label">Binance</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.horoscope_count }}</div><div class="stat-label">Hoàng đạo</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.quote_count }}</div><div class="stat-label">Quote</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.fact_count }}</div><div class="stat-label">Fact</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.joke_count }}</div><div class="stat-label">Joke</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.errors }}</div><div class="stat-label">Lỗi</div></div>
   </div>
@@ -2330,29 +3260,44 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
   <div class="commands">
     <div class="cmd-card"><code>/start</code><p>Chào hỏi + hướng dẫn</p></div>
     <div class="cmd-card"><code>/help</code><p>Hiển thị trợ giúp</p></div>
-    <div class="cmd-card"><code>/image &lt;mô tả&gt;</code><p>Tạo ảnh bằng AI</p></div>
-    <div class="cmd-card"><code>/code &lt;câu hỏi&gt;</code><p>Hỏi về lập trình</p></div>
-    <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm web (Tavily)</p></div>
-    <div class="cmd-card"><code>/wiki [vi|en] &lt;q&gt;</code><p>Wikipedia (FREE)</p></div>
-    <div class="cmd-card"><code>/youtube &lt;q&gt;</code><p>Tìm video YouTube</p></div>
-    <div class="cmd-card"><code>/define &lt;word&gt;</code><p>Từ điển Anh</p></div>
+    <div class="cmd-card"><code>/image &lt;mô tả&gt;</code><p>Tạo ảnh AI</p></div>
+    <div class="cmd-card"><code>/code &lt;câu hỏi&gt;</code><p>Hỏi code</p></div>
     <div class="cmd-card"><code>/translate [lang] &lt;txt&gt;</code><p>Dịch văn bản</p></div>
-    <div class="cmd-card"><code>/tiktok &lt;url&gt; [music]</code><p>Tải TikTok không logo</p></div>
-    <div class="cmd-card"><code>/ytdl &lt;url&gt;</code><p>Tải video YouTube</p></div>
-    <div class="cmd-card"><code>/ytmp3 &lt;url&gt;</code><p>YouTube → MP3</p></div>
-    <div class="cmd-card"><code>/xoso &lt;số&gt; [tỉnh]</code><p>Dò vé số theo tỉnh</p></div>
-    <div class="cmd-card"><code>/weather &lt;nơi&gt; [ngày]</code><p>Thời tiết (Open-Meteo)</p></div>
-    <div class="cmd-card"><code>/currency &lt;amt&gt; &lt;f&gt; &lt;t&gt;</code><p>Đổi tiền tệ</p></div>
-    <div class="cmd-card"><code>/crypto &lt;symbol&gt;</code><p>Giá crypto (CoinGecko)</p></div>
-    <div class="cmd-card"><code>/qr &lt;text&gt;</code><p>Tạo QR code</p></div>
-    <div class="cmd-card"><code>/shorten &lt;url&gt;</code><p>Rút gọn URL (is.gd)</p></div>
-    <div class="cmd-card"><code>/base64 enc|dec &lt;txt&gt;</code><p>Base64 encode/decode</p></div>
-    <div class="cmd-card"><code>/password [length]</code><p>Sinh mật khẩu mạnh</p></div>
-    <div class="cmd-card"><code>/ip [ip]</code><p>Tra thông tin IP</p></div>
-    <div class="cmd-card"><code>/calc &lt;biểu thức&gt;</code><p>Máy tính khoa học</p></div>
-    <div class="cmd-card"><code>/time [múi giờ]</code><p>Giờ hiện tại</p></div>
+    <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm web</p></div>
+    <div class="cmd-card"><code>/news [chủ đề]</code><p>Tin tức</p></div>
+    <div class="cmd-card"><code>/wiki [vi|en] &lt;q&gt;</code><p>Wikipedia</p></div>
+    <div class="cmd-card"><code>/youtube &lt;q&gt;</code><p>Tìm YouTube</p></div>
+    <div class="cmd-card"><code>/define &lt;word&gt;</code><p>Từ điển Anh</p></div>
+    <div class="cmd-card"><code>/country &lt;tên&gt;</code><p>Quốc gia</p></div>
+    <div class="cmd-card"><code>/tv &lt;tên&gt;</code><p>TV show</p></div>
+    <div class="cmd-card"><code>/github &lt;user&gt;</code><p>GitHub profile</p></div>
+    <div class="cmd-card"><code>/tiktok &lt;url&gt;</code><p>Tải TikTok</p></div>
+    <div class="cmd-card"><code>/ytdl &lt;url&gt;</code><p>Tải YT video</p></div>
+    <div class="cmd-card"><code>/ytmp3 &lt;url&gt;</code><p>YT → MP3</p></div>
+    <div class="cmd-card"><code>/xoso &lt;số&gt; [tỉnh]</code><p>Dò vé số</p></div>
+    <div class="cmd-card"><code>/weather &lt;nơi&gt;</code><p>Thời tiết</p></div>
+    <div class="cmd-card"><code>/currency &lt;amt&gt; &lt;f&gt; &lt;t&gt;</code><p>Đổi tiền</p></div>
+    <div class="cmd-card"><code>/crypto &lt;sym&gt;</code><p>Crypto (CoinGecko)</p></div>
+    <div class="cmd-card"><code>/binance &lt;pair&gt;</code><p>Binance ticker</p></div>
+    <div class="cmd-card"><code>/gold</code><p>Giá vàng</p></div>
+    <div class="cmd-card"><code>/qr &lt;text&gt;</code><p>QR code</p></div>
+    <div class="cmd-card"><code>/shorten &lt;url&gt;</code><p>Rút gọn URL</p></div>
+    <div class="cmd-card"><code>/base64 enc|dec &lt;txt&gt;</code><p>Base64</p></div>
+    <div class="cmd-card"><code>/binary &lt;num&gt; [base]</code><p>Convert base</p></div>
+    <div class="cmd-card"><code>/password [length]</code><p>Mật khẩu mạnh</p></div>
+    <div class="cmd-card"><code>/hash &lt;algo&gt; &lt;text&gt;</code><p>MD5/SHA256</p></div>
+    <div class="cmd-card"><code>/uuid [count]</code><p>UUID v4</p></div>
+    <div class="cmd-card"><code>/color &lt;hex&gt;</code><p>Info màu</p></div>
+    <div class="cmd-card"><code>/ip [ip]</code><p>Tra IP</p></div>
+    <div class="cmd-card"><code>/calc &lt;biểu thức&gt;</code><p>Máy tính</p></div>
+    <div class="cmd-card"><code>/time [tz]</code><p>Giờ hiện tại</p></div>
+    <div class="cmd-card"><code>/horoscope &lt;sign&gt;</code><p>Hoàng đạo</p></div>
+    <div class="cmd-card"><code>/quote</code><p>Câu nói hay</p></div>
+    <div class="cmd-card"><code>/fact</code><p>Fact ngẫu nhiên</p></div>
     <div class="cmd-card"><code>/joke [cat]</code><p>Câu nói vui</p></div>
-    <div class="cmd-card"><code>Nhắn tin</code><p>AI trả lời thông minh</p></div>
+    <div class="cmd-card"><code>/reverse &lt;text&gt;</code><p>Đảo text</p></div>
+    <div class="cmd-card"><code>/palindrome &lt;text&gt;</code><p>Check palindrome</p></div>
+    <div class="cmd-card"><code>Nhắn tin</code><p>AI trả lời</p></div>
   </div>
   
   <div class="logs">
