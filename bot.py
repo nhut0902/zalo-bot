@@ -52,11 +52,40 @@ stats = {
     "search_count": 0,
     "xoso_count": 0,
     "weather_count": 0,
+    "wiki_count": 0,
+    "currency_count": 0,
+    "crypto_count": 0,
+    "url_count": 0,
+    "ip_count": 0,
+    "yt_count": 0,
+    "dict_count": 0,
+    "joke_count": 0,
     "errors": 0,
     "started_at": time.time(),
 }
 recent_logs = []
 ai_jwt = ""
+
+# Simple in-memory cache: {key: (timestamp, value)}
+_cache = {}
+
+def cache_get(key: str, ttl_seconds: int = 300):
+    """Get value from cache if not expired. Returns None if missing/expired."""
+    if key in _cache:
+        ts, val = _cache[key]
+        if time.time() - ts < ttl_seconds:
+            return val
+        else:
+            del _cache[key]
+    return None
+
+def cache_set(key: str, value):
+    _cache[key] = (time.time(), value)
+    # Cleanup old entries (keep max 200)
+    if len(_cache) > 200:
+        oldest = sorted(_cache.items(), key=lambda x: x[1][0])[:50]
+        for k, _ in oldest:
+            _cache.pop(k, None)
 
 def log(msg):
     entry = f"[{time.strftime('%H:%M:%S')}] {msg}"
@@ -268,6 +297,13 @@ def fetch_xoso_results(province_input: str = "mb", date_str: str = None) -> dict
     if not date_str:
         date_str = datetime.datetime.now().strftime("%d-%m-%Y")
     
+    # Cache: results for same province+date don't change after draw (5 min TTL is plenty)
+    cache_key = f"xoso:{region}:{slug or 'mb'}:{date_str}"
+    cached = cache_get(cache_key, ttl_seconds=300)
+    if cached:
+        log(f"💾 cache hit {cache_key}")
+        return cached
+    
     # Build URL based on whether it's MB (dated URL) or province (always-today page)
     if region == "mb":
         # Miền Bắc uses dated URL: /xsmb-DD-MM-YYYY.html
@@ -313,13 +349,15 @@ def fetch_xoso_results(province_input: str = "mb", date_str: str = None) -> dict
     title_match = re.search(r'<title>([^<]+)</title>', html)
     title = title_match.group(1).strip() if title_match else ""
     
-    return {
+    result = {
         "province": display_name,
         "region": region.upper(),
         "date": date_str,
         "title": title,
         "prizes": prizes,
     }
+    cache_set(cache_key, result)
+    return result
 
 
 def check_lottery_ticket(user_number: str, province_input: str = "mb", date_str: str = None) -> str:
@@ -471,6 +509,12 @@ def geocode_city(city: str) -> dict:
 
 def fetch_weather(lat: float, lon: float, days: int = 7) -> dict:
     """Fetch current weather + N-day forecast from Open-Meteo (FREE, no API key)."""
+    # Cache weather by lat/lon/days for 10 min (current conditions change slowly)
+    cache_key = f"weather:{lat:.2f}:{lon:.2f}:{days}"
+    cached = cache_get(cache_key, ttl_seconds=600)
+    if cached:
+        log(f"💾 cache hit {cache_key}")
+        return cached
     try:
         r = requests.get(OPEN_METEO_FORECAST, params={
             "latitude": lat,
@@ -483,7 +527,9 @@ def fetch_weather(lat: float, lon: float, days: int = 7) -> dict:
             "forecast_days": days,
         }, timeout=10)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        cache_set(cache_key, data)
+        return data
     except Exception as e:
         return {"error": f"Lỗi tải thời tiết: {e}"}
 
@@ -573,55 +619,73 @@ async def cmd_start(update: Update, context):
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     await update.message.reply_text(
         f"🤖 Chào {name}!\n\nTôi là NhutBot trên Zalo.\n\n"
-        "📝 Lệnh:\n"
+        "📝 21 LỆNH:\n\n"
+        "🤖 AI:\n"
         "• Nhắn tin → AI trả lời\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
         "• /code <câu hỏi> → Hỏi code\n"
+        "• /translate [lang] <text> → Dịch\n\n"
+        "🔍 Tìm kiếm:\n"
         "• /search <từ khóa> → Tìm web\n"
-        "• /xoso <số> [tỉnh] → Dò vé số\n"
-        "• /weather <địa điểm> → Thời tiết\n"
-        "• /qr <text> → Tạo QR code\n"
-        "• /translate <text> → Dịch văn bản\n"
+        "• /wiki [lang] <query> → Wikipedia\n"
+        "• /youtube <query> → Tìm video YouTube\n"
+        "• /define <word> → Từ điển Anh\n\n"
+        "🛠️ Tiện ích:\n"
+        "• /qr <text> → QR code\n"
+        "• /shorten <url> → Rút gọn URL\n"
+        "• /base64 <enc|dec> <text> → Base64\n"
+        "• /password [length] → Sinh mật khẩu\n"
+        "• /ip [ip] → Tra IP\n\n"
+        "💰 Tài chính:\n"
+        "• /currency <amt> <from> <to> → Đổi tiền\n"
+        "• /crypto <symbol> → Giá crypto\n\n"
+        "🎰 Xổ số:\n"
+        "• /xoso <số> [tỉnh] → Dò vé số\n\n"
+        "🌤️ Khác:\n"
+        "• /weather <nơi> → Thời tiết\n"
         "• /calc <biểu thức> → Máy tính\n"
-        "• /time [múi giờ] → Giờ hiện tại\n"
-        "• /help → Trợ giúp"
+        "• /time [múi giờ] → Giờ\n"
+        "• /joke [cat] → Cười một phát\n\n"
+        "Gõ /help để xem chi tiết!"
     )
     stats["messages_sent"] += 1
     log(f"/start from {name}")
 
 async def cmd_help(update: Update, context):
     await update.message.reply_text(
-        "📋 HƯỚNG DẪN NhutBot\n\n"
-        "🤖 Nhắn tin → AI trả lời thông minh\n\n"
-        "🎨 /image <mô tả> → Tạo ảnh AI\n"
-        "    VD: /image con mèo trên mặt trăng\n\n"
-        "💻 /code <câu hỏi> → Hỏi về lập trình\n"
-        "    VD: /code hàm fibonacci Python\n\n"
-        "🔍 /search <từ khóa> → Tìm kiếm web\n"
-        "    VD: /search giá vàng hôm nay\n\n"
-        "🎰 /xoso <số> [tỉnh] → Dò vé số theo tỉnh\n"
-        "    VD: /xoso 94504\n"
-        "    VD: /xoso 94504 hcm (TP.HCM)\n"
-        "    VD: /xoso 04 danang (Đà Nẵng)\n"
-        "    VD: /xoso 94504 mb 08-09-2026 (ngày cụ thể)\n"
-        "    Gõ /xoso để xem tất cả tỉnh hỗ trợ\n\n"
-        "🌤️ /weather <địa điểm> [số ngày] → Thời tiết\n"
-        "    VD: /weather Hà Nội\n"
-        "    VD: /weather Đà Nẵng 3 (3 ngày)\n"
-        "    VD: /weather Tokyo, /weather London\n"
-        "    📡 Open-Meteo (FREE, no API key)\n\n"
-        "📱 /qr <text> → Tạo QR code\n"
-        "    VD: /qr https://google.com\n\n"
-        "🌐 /translate [lang] <text> → Dịch văn bản\n"
-        "    VD: /translate hello\n"
-        "    VD: /translate en Xin chào\n\n"
-        "🧮 /calc <biểu thức> → Máy tính\n"
-        "    VD: /calc 2+3*4\n"
-        "    VD: /calc sqrt(144)\n\n"
-        "🕐 /time [múi giờ] → Giờ hiện tại\n"
-        "    VD: /time\n"
-        "    VD: /time us, /time japan, /time london\n\n"
-        "💡 Nhắn tự nhiên, AI hiểu tiếng Việt!"
+        "📋 HƯỚNG DẪN NhutBot v4 — 21 LỆNH\n\n"
+        "🤖 AI & CHAT\n"
+        "• Nhắn tin → AI trả lời thông minh\n"
+        "• /image <mô tả> → Tạo ảnh AI (Pollinations)\n"
+        "• /code <câu hỏi> → Hỏi về lập trình\n"
+        "• /translate [lang] <text> → Dịch (gemini-1.5-flash)\n\n"
+        "🔍 TÌM KIẾM & TRA CỨU\n"
+        "• /search <từ khóa> → Tìm web (Tavily)\n"
+        "• /wiki [vi|en] <query> → Wikipedia (FREE)\n"
+        "• /youtube <query> → Tìm video YouTube\n"
+        "• /define <word> → Từ điển Anh (FREE)\n\n"
+        "🛠️ TIỆN ÍCH\n"
+        "• /qr <text> → Tạo QR code (quickchart.io)\n"
+        "• /shorten <url> → Rút gọn URL (is.gd, FREE)\n"
+        "• /base64 enc|dec <text> → Base64 encode/decode\n"
+        "• /password [length] [count] → Sinh mật khẩu mạnh\n"
+        "• /ip [ip] → Tra thông tin IP (ip-api.com)\n\n"
+        "💰 TÀI CHÍNH\n"
+        "• /currency <amount> <from> <to> → Đổi tiền (FREE)\n"
+        "    VD: /currency 100 USD VND\n"
+        "• /crypto <symbol> → Giá crypto (CoinGecko)\n"
+        "    VD: /crypto bitcoin ethereum solana\n\n"
+        "🎰 XỔ SỐ\n"
+        "• /xoso <số> [tỉnh] [date] → Dò vé số\n"
+        "    VD: /xoso 94504 hcm\n"
+        "    VD: /xoso 94504 mb 08-09-2026\n\n"
+        "🌤️ KHÁC\n"
+        "• /weather <nơi> [số ngày] → Thời tiết (Open-Meteo)\n"
+        "• /calc <biểu thức> → Máy tính khoa học\n"
+        "• /time [múi giờ] → Giờ hiện tại\n"
+        "• /joke [cat] → Câu nói vui (JokeAPI)\n\n"
+        "💡 Nhắn tự nhiên, AI hiểu tiếng Việt!\n"
+        "📊 Dashboard: https://zalo-bot-three.vercel.app/"
     )
     stats["messages_sent"] += 1
 
@@ -1066,6 +1130,618 @@ async def cmd_time(update: Update, context):
     stats["messages_sent"] += 1
 
 
+# ========== 10 NEW UTILITY COMMANDS ==========
+
+async def cmd_wiki(update: Update, context):
+    """Wikipedia summary — /wiki <query> [lang]"""
+    if not context.args:
+        await update.message.reply_text(
+            "📚 Tìm Wikipedia\n\n"
+            "Cách dùng:\n"
+            "• /wiki <từ khóa> → Wikipedia tiếng Việt\n"
+            "• /wiki en <từ khóa> → Wikipedia tiếng Anh\n\n"
+            "VD: /wiki Hà Nội, /wiki en Vietnam\n"
+            "📡 Nguồn: Wikipedia REST API (FREE)"
+        )
+        return
+    
+    args = context.args
+    lang = "vi"
+    query_args = args
+    if args[0].lower() in ("vi", "en", "fr", "ja", "zh", "ko", "es", "de", "ru"):
+        lang = args[0].lower()
+        query_args = args[1:]
+    
+    query = " ".join(query_args)
+    if not query:
+        await update.message.reply_text("❌ Vui lòng nhập từ khóa.")
+        return
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/wiki ({lang}): {query}")
+    
+    # Cache for 1 hour (Wikipedia content rarely changes)
+    cache_key = f"wiki:{lang}:{query.lower()}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if cached:
+        await update.message.reply_text(cached)
+        stats["messages_sent"] += 1
+        stats["wiki_count"] += 1
+        return
+    
+    try:
+        url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(query)}"
+        # Wikimedia requires a descriptive User-Agent with contact info, otherwise returns 403
+        r = requests.get(url, headers={
+            "User-Agent": "NhutBot/1.0 (https://zalo-bot-three.vercel.app; contact@nhutbot.com)",
+            "Accept": "application/json",
+        }, timeout=15)
+        if r.status_code == 404:
+            await update.message.reply_text(f"❌ Không tìm thấy '{query}' trên Wikipedia {lang}.")
+            stats["errors"] += 1
+            return
+        r.raise_for_status()
+        data = r.json()
+        
+        title = data.get("title", query)
+        extract = data.get("extract", "")
+        if not extract:
+            await update.message.reply_text(f"❌ Bài viết '{title}' không có tóm tắt.")
+            stats["errors"] += 1
+            return
+        
+        thumb = data.get("thumbnail", {}).get("source", "")
+        url_page = (data.get("content_urls", {}).get("desktop", {}) or {}).get("page", "")
+        
+        msg = f"📚 WIKIPEDIA ({lang.upper()})\n{'─' * 30}\n📌 {title}\n\n{extract[:1500]}\n"
+        if url_page:
+            msg += f"\n🔗 {url_page}"
+        msg += "\n\n📡 Nguồn: Wikipedia REST API"
+        
+        cache_set(cache_key, msg)
+        await update.message.reply_text(msg)
+        stats["wiki_count"] += 1
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
+async def cmd_currency(update: Update, context):
+    """Currency exchange — /currency <amount> <from> <to>"""
+    if not context.args or len(context.args) < 3:
+        await update.message.reply_text(
+            "💸 QUI ĐỔI TIỀN TỆ\n\n"
+            "Cách dùng: /currency <số tiền> <từ> <đến>\n\n"
+            "VD:\n"
+            "  /currency 100 USD VND\n"
+            "  /currency 1000000 VND USD\n"
+            "  /currency 50 EUR USD\n\n"
+            "📡 Nguồn: open.er-api.com (FREE, no key)"
+        )
+        return
+    
+    try:
+        amount = float(context.args[0])
+        from_curr = context.args[1].upper()
+        to_curr = context.args[2].upper()
+    except ValueError:
+        await update.message.reply_text("❌ Số tiền không hợp lệ.")
+        stats["errors"] += 1
+        return
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/currency: {amount} {from_curr} → {to_curr}")
+    
+    # Cache rates 30 min (currency doesn't change fast)
+    cache_key = f"rates:{from_curr}"
+    rates_data = cache_get(cache_key, ttl_seconds=1800)
+    if not rates_data:
+        try:
+            r = requests.get(f"https://open.er-api.com/v6/latest/{from_curr}", timeout=10)
+            r.raise_for_status()
+            rates_data = r.json()
+            cache_set(cache_key, rates_data)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi tải tỷ giá: {e}")
+            stats["errors"] += 1
+            return
+    
+    rates = rates_data.get("rates", {})
+    rate = rates.get(to_curr)
+    if not rate:
+        await update.message.reply_text(f"❌ Không tìm thấy tỷ giá {from_curr} → {to_curr}")
+        stats["errors"] += 1
+        return
+    
+    converted = amount * rate
+    updated = rates_data.get("time_last_update_utc", "N/A")
+    
+    msg = (
+        f"💸 QUI ĐỔI TIỀN TỆ\n"
+        f"{'─' * 30}\n"
+        f"💵 {amount:,.2f} {from_curr}\n"
+        f"⬇️\n"
+        f"💵 {converted:,.2f} {to_curr}\n"
+        f"{'─' * 30}\n"
+        f"📊 Tỷ giá: 1 {from_curr} = {rate:,.4f} {to_curr}\n"
+        f"🕐 Cập nhật: {updated}\n"
+        f"📡 Nguồn: open.er-api.com"
+    )
+    await update.message.reply_text(msg)
+    stats["currency_count"] += 1
+    stats["messages_sent"] += 1
+
+
+async def cmd_crypto(update: Update, context):
+    """Crypto price — /crypto <symbol>"""
+    if not context.args:
+        await update.message.reply_text(
+            "💰 GIÁ CRYPTO\n\n"
+            "Cách dùng: /crypto <symbol>\n\n"
+            "VD:\n"
+            "  /crypto bitcoin\n"
+            "  /crypto ethereum\n"
+            "  /crypto solana\n"
+            "  /crypto bitcoin ethereum (nhiều)\n\n"
+            "📡 Nguồn: CoinGecko (FREE, no key)"
+        )
+        return
+    
+    # CoinGecko IDs vs symbols map (common ones)
+    COIN_MAP = {
+        "btc": "bitcoin", "bitcoin": "bitcoin",
+        "eth": "ethereum", "ethereum": "ethereum",
+        "sol": "solana", "solana": "solana",
+        "bnb": "binancecoin", "binance": "binancecoin",
+        "xrp": "ripple", "ripple": "ripple",
+        "ada": "cardano", "cardano": "cardano",
+        "doge": "dogecoin", "dogecoin": "dogecoin",
+        "dot": "polkadot", "polkadot": "polkadot",
+        "matic": "matic-network", "polygon": "matic-network",
+        "avax": "avalanche-2", "avalanche": "avalanche-2",
+        "ltc": "litecoin", "litecoin": "litecoin",
+        "usdt": "tether", "tether": "tether",
+        "usdc": "usd-coin", "usd-coin": "usd-coin",
+        "shib": "shiba-inu", "shiba": "shiba-inu",
+        "tron": "tron", "trx": "tron",
+    }
+    
+    coins = []
+    for arg in context.args:
+        coin = COIN_MAP.get(arg.lower(), arg.lower())
+        coins.append(coin)
+    
+    coins_str = ",".join(coins[:10])  # max 10
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/crypto: {coins_str}")
+    
+    # Cache 2 min (crypto moves fast)
+    cache_key = f"crypto:{coins_str}"
+    cached = cache_get(cache_key, ttl_seconds=120)
+    if not cached:
+        try:
+            r = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": coins_str, "vs_currencies": "usd,/vnd", "include_24hr_change": "true", "include_market_cap": "true"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi tải giá crypto: {e}")
+            stats["errors"] += 1
+            return
+    
+    parts = ["💰 GIÁ CRYPTO", "─" * 30]
+    for coin in coins:
+        info = cached.get(coin)
+        if not info:
+            parts.append(f"❌ {coin}: không tìm thấy")
+            continue
+        usd = info.get("usd", 0)
+        vnd = info.get("vnd", 0)
+        change = info.get("usd_24h_change", 0)
+        mcap = info.get("usd_market_cap", 0)
+        emoji = "📈" if change >= 0 else "📉"
+        parts.append(f"🔹 {coin.upper()}")
+        parts.append(f"   💵 ${usd:,.2f} ({vnd:,.0f} VND)")
+        parts.append(f"   {emoji} 24h: {change:+.2f}%")
+        if mcap:
+            parts.append(f"   🏦 Market cap: ${mcap:,.0f}")
+        parts.append("")
+    
+    parts.append("📡 Nguồn: CoinGecko (FREE)")
+    await update.message.reply_text("\n".join(parts))
+    stats["crypto_count"] += 1
+    stats["messages_sent"] += 1
+
+
+async def cmd_shorten(update: Update, context):
+    """URL shortener — /shorten <url>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🔗 RÚT GỌN URL\n\n"
+            "Cách dùng: /shorten <url>\n\n"
+            "VD: /shorten https://google.com\n\n"
+            "📡 Nguồn: is.gd (FREE, no key)"
+        )
+        return
+    
+    url = context.args[0]
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/shorten: {url}")
+    
+    try:
+        r = requests.get("https://is.gd/create.php", params={
+            "format": "json",
+            "url": url,
+        }, timeout=10)
+        data = r.json()
+        if "shorturl" in data:
+            await update.message.reply_text(
+                f"🔗 URL RÚT GỌN\n{'─' * 30}\n"
+                f"📝 Gốc: {url}\n"
+                f"✅ Ngắn: {data['shorturl']}\n\n"
+                f"📡 Nguồn: is.gd"
+            )
+            stats["url_count"] += 1
+        else:
+            await update.message.reply_text(f"❌ Lỗi: {data.get('errormessage', 'unknown')}")
+            stats["errors"] += 1
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
+async def cmd_ip(update: Update, context):
+    """IP info — /ip [ip]"""
+    if context.args:
+        ip = context.args[0]
+    else:
+        ip = ""  # empty = show server IP for demo
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/ip: {ip or '(own)'}")
+    
+    # Cache IP lookups for 1h
+    cache_key = f"ip:{ip}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if not cached:
+        try:
+            url = f"http://ip-api.com/json/{ip}?fields=query,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,reverse,mobile,proxy,hosting"
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    if cached.get("status") == "fail":
+        await update.message.reply_text(f"❌ Lỗi: {cached.get('message', 'unknown')}")
+        stats["errors"] += 1
+        return
+    
+    parts = [
+        f"🌐 THÔNG TIN IP",
+        f"{'─' * 30}",
+        f"🔢 IP: {cached.get('query', 'N/A')}",
+        f"🌍 Quốc gia: {cached.get('country', 'N/A')} ({cached.get('countryCode', '')})",
+        f"🏙️ Thành phố: {cached.get('city', 'N/A')}, {cached.get('regionName', 'N/A')}",
+    ]
+    if cached.get("zip"):
+        parts.append(f"📮 ZIP: {cached.get('zip')}")
+    if cached.get("lat") and cached.get("lon"):
+        parts.append(f"📍 Tọa độ: {cached.get('lat')}, {cached.get('lon')}")
+    if cached.get("timezone"):
+        parts.append(f"🕐 Múi giờ: {cached.get('timezone')}")
+    if cached.get("isp"):
+        parts.append(f"📡 ISP: {cached.get('isp')}")
+    if cached.get("org"):
+        parts.append(f"🏢 Tổ chức: {cached.get('org')}")
+    if cached.get("as"):
+        parts.append(f"🏷️ AS: {cached.get('as')}")
+    if cached.get("proxy"):
+        parts.append("🚨 VPN/Proxy: CÓ")
+    if cached.get("hosting"):
+        parts.append("☁️ Datacenter: CÓ")
+    
+    parts.append("")
+    parts.append("📡 Nguồn: ip-api.com (FREE)")
+    
+    await update.message.reply_text("\n".join(parts))
+    stats["ip_count"] += 1
+    stats["messages_sent"] += 1
+
+
+async def cmd_password(update: Update, context):
+    """Generate password — /password [length] [count]"""
+    import secrets
+    import string
+    
+    length = 16
+    count = 1
+    if context.args:
+        try:
+            length = int(context.args[0])
+            if length < 4: length = 4
+            if length > 128: length = 128
+            if len(context.args) >= 2:
+                count = int(context.args[1])
+                if count < 1: count = 1
+                if count > 10: count = 10
+        except ValueError:
+            pass
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/password: length={length} count={count}")
+    
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}<>?"
+    parts = [
+        f"🔐 MẬT KHẨU NGẪU NHIÊN",
+        f"{'─' * 30}",
+        f"📏 Độ dài: {length} ký tự",
+        f"🔢 Số lượng: {count}",
+        f"{'─' * 30}",
+        "",
+    ]
+    for i in range(count):
+        pw = ''.join(secrets.choice(alphabet) for _ in range(length))
+        parts.append(f"{i+1}. `{pw}`")
+    
+    parts.append("")
+    parts.append("✨ Sinh bằng secrets module (cryptographically secure)")
+    
+    await update.message.reply_text("\n".join(parts))
+    stats["messages_sent"] += 1
+
+
+async def cmd_define(update: Update, context):
+    """English dictionary — /define <word>"""
+    if not context.args:
+        await update.message.reply_text(
+            "📖 TỪ ĐIỂN TIẾNG ANH\n\n"
+            "Cách dùng: /define <word>\n\n"
+            "VD: /define hello, /define serendipity\n\n"
+            "📡 Nguồn: dictionaryapi.dev (FREE, no key)"
+        )
+        return
+    
+    word = " ".join(context.args).lower().strip()
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/define: {word}")
+    
+    # Cache 1 day (definitions don't change)
+    cache_key = f"define:{word}"
+    cached = cache_get(cache_key, ttl_seconds=86400)
+    if not cached:
+        try:
+            r = requests.get(
+                f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}",
+                timeout=10,
+            )
+            if r.status_code == 404:
+                await update.message.reply_text(f"❌ Không tìm thấy từ '{word}' trong từ điển.")
+                stats["errors"] += 1
+                return
+            r.raise_for_status()
+            cached = r.json()
+            cache_set(cache_key, cached)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+            stats["errors"] += 1
+            return
+    
+    if not cached or not isinstance(cached, list):
+        await update.message.reply_text(f"❌ Không tìm thấy từ '{word}'.")
+        stats["errors"] += 1
+        return
+    
+    entry = cached[0]
+    word_title = entry.get("word", word)
+    phonetic = entry.get("phonetic", "")
+    
+    parts = [f"📖 TỪ ĐIỂN: {word_title}", f"{'─' * 30}"]
+    if phonetic:
+        parts.append(f"🔤 Phiên âm: {phonetic}")
+    parts.append("")
+    
+    meanings = entry.get("meanings", [])[:3]  # max 3 meanings
+    for m in meanings:
+        part_of_speech = m.get("partOfSpeech", "")
+        parts.append(f"📝 ({part_of_speech})")
+        definitions = m.get("definitions", [])[:3]  # max 3 per POS
+        for i, d in enumerate(definitions, 1):
+            definition = d.get("definition", "")
+            example = d.get("example", "")
+            parts.append(f"  {i}. {definition[:200]}")
+            if example:
+                parts.append(f"     VD: \"{example[:150]}\"")
+        parts.append("")
+    
+    parts.append("📡 Nguồn: dictionaryapi.dev")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    stats["dict_count"] += 1
+    stats["messages_sent"] += 1
+
+
+async def cmd_base64(update: Update, context):
+    """Base64 encode/decode — /base64 <enc|dec> <text>"""
+    import base64
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "🔧 BASE64\n\n"
+            "Cách dùng:\n"
+            "• /base64 enc <text> → Encode\n"
+            "• /base64 dec <text> → Decode\n\n"
+            "VD:\n"
+            "  /base64 enc Hello World\n"
+            "  /base64 dec SGVsbG8gV29ybGQ="
+        )
+        return
+    
+    mode = context.args[0].lower()
+    text = " ".join(context.args[1:])
+    
+    if mode in ("enc", "encode"):
+        try:
+            encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+            await update.message.reply_text(
+                f"🔧 BASE64 ENCODE\n{'─' * 30}\n"
+                f"📝 Input: {text[:500]}\n"
+                f"✅ Output: `{encoded[:1500]}`"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi encode: {e}")
+            stats["errors"] += 1
+    elif mode in ("dec", "decode"):
+        try:
+            decoded = base64.b64decode(text).decode("utf-8", errors="replace")
+            await update.message.reply_text(
+                f"🔧 BASE64 DECODE\n{'─' * 30}\n"
+                f"📝 Input: {text[:500]}\n"
+                f"✅ Output: {decoded[:1500]}"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi decode: {e}")
+            stats["errors"] += 1
+    else:
+        await update.message.reply_text("❌ Mode phải là `enc` hoặc `dec`.")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
+async def cmd_joke(update: Update, context):
+    """Random joke — /joke [category]"""
+    if context.args:
+        category = context.args[0].lower()
+        if category not in ("programming", "misc", "dark", "pun", "spooky", "christmas"):
+            await update.message.reply_text(
+                "😂 Category: programming, misc, dark, pun, spooky, christmas"
+            )
+            return
+    else:
+        category = "Any"
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/joke: {category}")
+    
+    try:
+        r = requests.get(
+            "https://v2.jokeapi.dev/joke/" + category,
+            params={"format": "json", "type": "single", "lang": "en", "safe-mode": "true"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        
+        if data.get("error"):
+            await update.message.reply_text(f"❌ Lỗi: {data.get('message')}")
+            stats["errors"] += 1
+            return
+        
+        joke = data.get("joke", "Không có joke :(")
+        cat = data.get("category", "Any")
+        
+        await update.message.reply_text(
+            f"😂 JOKE ({cat})\n{'─' * 30}\n\n{joke}\n\n📡 Nguồn: JokeAPI"
+        )
+        stats["joke_count"] += 1
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
+async def cmd_youtube(update: Update, context):
+    """YouTube search — /youtube <query>"""
+    if not context.args:
+        await update.message.reply_text(
+            "🎬 TÌM VIDEO YOUTUBE\n\n"
+            "Cách dùng: /youtube <từ khóa>\n\n"
+            "VD:\n"
+            "  /youtube nhạc Việt Nam\n"
+            "  /youtube python tutorial\n\n"
+            "📡 Nguồn: Tavily search (filtered for youtube.com)"
+        )
+        return
+    
+    query = " ".join(context.args)
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/youtube: {query}")
+    
+    # Use Tavily with site filter for youtube.com
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(TAVILY_API_KEY)
+        resp = client.search(
+            query=f"site:youtube.com {query}",
+            search_depth="basic",
+            max_results=5,
+            include_answer=False,
+        )
+        results = resp.get("results", [])
+        
+        if not results:
+            await update.message.reply_text(f"❌ Không tìm thấy video cho '{query}'")
+            stats["errors"] += 1
+            return
+        
+        parts = [f"🎬 YOUTUBE: \"{query}\"", "─" * 30, ""]
+        for i, item in enumerate(results[:5], 1):
+            title = item.get("title", "N/A")[:80]
+            url = item.get("url", "")
+            # Extract video ID for thumbnail
+            video_id = ""
+            if "watch?v=" in url:
+                video_id = url.split("watch?v=")[1][:11]
+            elif "youtu.be/" in url:
+                video_id = url.split("youtu.be/")[1][:11]
+            parts.append(f"{i}. {title}")
+            if url:
+                parts.append(f"   🔗 {url}")
+            if video_id:
+                parts.append(f"   🖼️ https://img.youtube.com/vi/{video_id}/hqdefault.jpg")
+            parts.append("")
+        
+        parts.append("📡 Nguồn: Tavily search")
+        
+        msg = "\n".join(parts)
+        if len(msg) > 1900:
+            for i in range(0, len(msg), 1900):
+                await update.message.reply_text(msg[i:i+1900])
+                await asyncio.sleep(0.3)
+        else:
+            await update.message.reply_text(msg)
+        
+        stats["yt_count"] += 1
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
 async def on_message(update: Update, context):
     stats["messages_received"] += 1
     msg = update.message.text
@@ -1108,6 +1784,17 @@ def init_bot():
     bot_app.add_handler(CommandHandler("translate", cmd_translate))
     bot_app.add_handler(CommandHandler("calc", cmd_calc))
     bot_app.add_handler(CommandHandler("time", cmd_time))
+    # 10 new commands
+    bot_app.add_handler(CommandHandler("wiki", cmd_wiki))
+    bot_app.add_handler(CommandHandler("currency", cmd_currency))
+    bot_app.add_handler(CommandHandler("crypto", cmd_crypto))
+    bot_app.add_handler(CommandHandler("shorten", cmd_shorten))
+    bot_app.add_handler(CommandHandler("ip", cmd_ip))
+    bot_app.add_handler(CommandHandler("password", cmd_password))
+    bot_app.add_handler(CommandHandler("define", cmd_define))
+    bot_app.add_handler(CommandHandler("base64", cmd_base64))
+    bot_app.add_handler(CommandHandler("joke", cmd_joke))
+    bot_app.add_handler(CommandHandler("youtube", cmd_youtube))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
@@ -1157,9 +1844,17 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="stat-card"><div class="stat-value">{{ stats.messages_sent }}</div><div class="stat-label">Tin gửi</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.ai_calls }}</div><div class="stat-label">AI calls</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.images_generated }}</div><div class="stat-label">Ảnh tạo</div></div>
-    <div class="stat-card"><div class="stat-value">{{ stats.search_count }}</div><div class="stat-label">Tìm kiếm</div></div>
-    <div class="stat-card"><div class="stat-value">{{ stats.xoso_count }}</div><div class="stat-label">Dò vé số</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.search_count }}</div><div class="stat-label">Tìm web</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.wiki_count }}</div><div class="stat-label">Wiki</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.yt_count }}</div><div class="stat-label">YouTube</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.xoso_count }}</div><div class="stat-label">Dò vé</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.weather_count }}</div><div class="stat-label">Thời tiết</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.currency_count }}</div><div class="stat-label">Đổi tiền</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.crypto_count }}</div><div class="stat-label">Crypto</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.dict_count }}</div><div class="stat-label">Tra từ</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.url_count }}</div><div class="stat-label">Rút gọn</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.ip_count }}</div><div class="stat-label">Tra IP</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.joke_count }}</div><div class="stat-label">Joke</div></div>
     <div class="stat-card"><div class="stat-value">{{ stats.errors }}</div><div class="stat-label">Lỗi</div></div>
   </div>
   
@@ -1168,13 +1863,23 @@ h1 { color:#0A84FF; font-size:28px; margin-bottom:8px; }
     <div class="cmd-card"><code>/help</code><p>Hiển thị trợ giúp</p></div>
     <div class="cmd-card"><code>/image &lt;mô tả&gt;</code><p>Tạo ảnh bằng AI</p></div>
     <div class="cmd-card"><code>/code &lt;câu hỏi&gt;</code><p>Hỏi về lập trình</p></div>
-    <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm kiếm web (Tavily)</p></div>
+    <div class="cmd-card"><code>/search &lt;từ khóa&gt;</code><p>Tìm web (Tavily)</p></div>
+    <div class="cmd-card"><code>/wiki [vi|en] &lt;q&gt;</code><p>Wikipedia (FREE)</p></div>
+    <div class="cmd-card"><code>/youtube &lt;q&gt;</code><p>Tìm video YouTube</p></div>
+    <div class="cmd-card"><code>/define &lt;word&gt;</code><p>Từ điển Anh</p></div>
+    <div class="cmd-card"><code>/translate [lang] &lt;txt&gt;</code><p>Dịch văn bản</p></div>
     <div class="cmd-card"><code>/xoso &lt;số&gt; [tỉnh]</code><p>Dò vé số theo tỉnh</p></div>
-    <div class="cmd-card"><code>/weather &lt;nơi&gt; [số ngày]</code><p>Thời tiết (Open-Meteo free)</p></div>
+    <div class="cmd-card"><code>/weather &lt;nơi&gt; [ngày]</code><p>Thời tiết (Open-Meteo)</p></div>
+    <div class="cmd-card"><code>/currency &lt;amt&gt; &lt;f&gt; &lt;t&gt;</code><p>Đổi tiền tệ</p></div>
+    <div class="cmd-card"><code>/crypto &lt;symbol&gt;</code><p>Giá crypto (CoinGecko)</p></div>
     <div class="cmd-card"><code>/qr &lt;text&gt;</code><p>Tạo QR code</p></div>
-    <div class="cmd-card"><code>/translate [lang] &lt;text&gt;</code><p>Dịch văn bản</p></div>
+    <div class="cmd-card"><code>/shorten &lt;url&gt;</code><p>Rút gọn URL (is.gd)</p></div>
+    <div class="cmd-card"><code>/base64 enc|dec &lt;txt&gt;</code><p>Base64 encode/decode</p></div>
+    <div class="cmd-card"><code>/password [length]</code><p>Sinh mật khẩu mạnh</p></div>
+    <div class="cmd-card"><code>/ip [ip]</code><p>Tra thông tin IP</p></div>
     <div class="cmd-card"><code>/calc &lt;biểu thức&gt;</code><p>Máy tính khoa học</p></div>
     <div class="cmd-card"><code>/time [múi giờ]</code><p>Giờ hiện tại</p></div>
+    <div class="cmd-card"><code>/joke [cat]</code><p>Câu nói vui</p></div>
     <div class="cmd-card"><code>Nhắn tin</code><p>AI trả lời thông minh</p></div>
   </div>
   
