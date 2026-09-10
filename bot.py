@@ -1833,12 +1833,11 @@ async def cmd_tiktok(update: Update, context):
             "🎬 TẢI TIKTOK KHÔNG LOGO\n\n"
             "Cách dùng:\n"
             "• /tiktok <url> → Tải video không logo\n"
-            "• /tiktok <url> music → Tải nhạc\n"
-            "• /tiktok <url> info → Xem thông tin + link\n\n"
+            "• /tiktok <url> music → Tải nhạc\n\n"
             "Hỗ trợ:\n"
-            "✅ Video TikTok (no watermark)\n"
-            "✅ Ảnh slide (photo post)\n"
-            "✅ Âm thanh (MP3)\n\n"
+            "✅ Video TikTok (gửi ảnh bìa + link tải)\n"
+            "✅ Ảnh slide (gửi từng ảnh trực tiếp)\n"
+            "✅ Âm thanh (MP3) (gửi ảnh + link nhạc)\n\n"
             "VD:\n"
             "  /tiktok https://www.tiktok.com/@user/video/1234567890\n"
             "  /tiktok https://vm.tiktok.com/ABCDEF/ music\n\n"
@@ -1877,50 +1876,77 @@ async def cmd_tiktok(update: Update, context):
     play_count = data.get("play_count", 0)
     digg_count = data.get("digg_count", 0)
     
-    # Build message
-    parts = [
-        f"🎬 TIKTOK",
-        f"{'─' * 30}",
-        f"👤 Tác giả: {author}",
-        f"📝 Tiêu đề: {title}",
-    ]
-    if duration > 0:
-        parts.append(f"⏱️ Thời lượng: {duration}s")
-    parts.append(f"👁️ Lượt xem: {play_count:,} | ❤️ {digg_count:,}")
-    parts.append("")
+    # Send cover/thumbnail as photo first (if no photo slides)
+    if not images and cover:
+        try:
+            caption_parts = [
+                f"🎬 {title[:100]}",
+                f"👤 {author} | ⏱️ {duration}s | 👁️ {play_count:,} | ❤️ {digg_count:,}",
+            ]
+            await update.message.reply_photo(
+                photo=cover,
+                caption="\n".join(caption_parts)
+            )
+        except Exception as e:
+            log(f"Cover send failed: {e}")
     
-    # Photo slides
+    # Photo slides — send each image directly (this is what user wants!)
     if images:
-        parts.append(f"🖼️ Photo slides ({len(images)} ảnh):")
-        for i, img in enumerate(images[:5], 1):
-            parts.append(f"  {i}. {img}")
-        if len(images) > 5:
-            parts.append(f"  ... và {len(images) - 5} ảnh nữa")
+        # Send each image as photo (max 10 to avoid spam)
+        sent_count = 0
+        for img_url in images[:10]:
+            try:
+                await update.message.reply_photo(
+                    photo=img_url,
+                    caption=f"🖼️ Ảnh {sent_count + 1}/{len(images)}" if sent_count == 0 else None
+                )
+                sent_count += 1
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                log(f"Image send failed {sent_count}: {e}")
+                # Fallback to text URL
+                await update.message.reply_text(f"🖼️ Ảnh {sent_count + 1}: {img_url}")
+                sent_count += 1
+        
+        # Summary
+        summary = f"✅ Đã gửi {sent_count}/{len(images)} ảnh"
+        if len(images) > 10:
+            summary += f"\n📝 Còn {len(images) - 10} ảnh nữa — dùng /tiktok <url> info để xem tất cả"
+        await update.message.reply_text(summary)
     else:
-        # Video
+        # Video — Zalo doesn't support sendVideo, so send cover + URL as text
+        info_parts = [
+            f"🎬 TIKTOK VIDEO (KHÔNG LOGO)",
+            f"{'─' * 30}",
+            f"👤 Tác giả: {author}",
+            f"📝 Tiêu đề: {title[:200]}",
+        ]
+        if duration > 0:
+            info_parts.append(f"⏱️ Thời lượng: {duration}s")
+        info_parts.append(f"👁️ Lượt xem: {play_count:,} | ❤️ {digg_count:,}")
+        info_parts.append("")
+        
         if mode == "music" and music_url:
-            parts.append("🎵 LINK TẢI NHẠC (MP3):")
-            parts.append(music_url)
+            info_parts.append("🎵 LINK TẢI NHẠC (MP3):")
+            info_parts.append(music_url)
         else:
-            parts.append("✅ LINK TẢI VIDEO KHÔNG LOGO:")
-            parts.append(play_url)
-            parts.append("")
+            info_parts.append("📥 LINK TẢI VIDEO KHÔNG LOGO:")
+            info_parts.append(play_url)
             if music_url:
-                parts.append(f"🎵 Nhạc: {music_url}")
-            if wm_url:
-                parts.append(f"ℹ️ Có logo: {wm_url}")
-    
-    parts.append("")
-    parts.append("💡 Tip: Mở link trên trình duyệt để tải về. Nếu bị 503, thêm header Referer: https://www.tikwm.com/")
-    parts.append("📡 Nguồn: tikwm.com")
-    
-    msg = "\n".join(parts)
-    if len(msg) > 1900:
-        for i in range(0, len(msg), 1900):
-            await update.message.reply_text(msg[i:i+1900])
-            await asyncio.sleep(0.3)
-    else:
-        await update.message.reply_text(msg)
+                info_parts.append("")
+                info_parts.append(f"🎵 Nhạc MP3: {music_url}")
+        
+        info_parts.append("")
+        info_parts.append("💡 Mở link trên trình duyệt để tải về (chỉnh header Referer nếu lỗi 503)")
+        info_parts.append("📡 Nguồn: tikwm.com")
+        
+        msg = "\n".join(info_parts)
+        if len(msg) > 1900:
+            for i in range(0, len(msg), 1900):
+                await update.message.reply_text(msg[i:i+1900])
+                await asyncio.sleep(0.3)
+        else:
+            await update.message.reply_text(msg)
     
     if "tiktok_count" not in stats:
         stats["tiktok_count"] = 0
@@ -1939,7 +1965,7 @@ async def cmd_ytdl(update: Update, context):
             "  /ytdl https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
             "  /ytdl https://youtu.be/dQw4w9WgXcQ\n"
             "  /ytdl https://www.youtube.com/shorts/VIDEO_ID\n\n"
-            "✅ Trả về: tiêu đề, tác giả, thumbnail + link tải\n"
+            "✅ Trả về: ảnh thumbnail + link tải\n"
             "📡 Nguồn: Piped API + YouTube oEmbed"
         )
         return
@@ -1973,64 +1999,75 @@ async def cmd_ytdl(update: Update, context):
     author = oembed.get("author_name", "Unknown")
     thumbnail = oembed.get("thumbnail_url", f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg")
     
-    parts = [
-        f"🎬 YOUTUBE DOWNLOAD",
-        f"{'─' * 30}",
-        f"📝 Tiêu đề: {title[:200]}",
-        f"👤 Kênh: {author}",
-        f"🔗 URL: https://www.youtube.com/watch?v={video_id}",
-        f"🖼️ Thumbnail: {thumbnail}",
-        "",
-    ]
-    
-    # Try to get download URL via Piped
+    # Try Piped first
     streams = fetch_youtube_streams(video_id)
     
+    # Get duration & views from Piped
+    duration = 0
+    views = 0
     if "error" not in streams:
         piped_title = streams.get("title", "")
         if piped_title:
-            parts[2] = f"📝 Tiêu đề: {piped_title[:200]}"
+            title = piped_title[:200]
         duration = streams.get("duration", 0)
         views = streams.get("views", 0)
+    
+    # Send YouTube thumbnail as photo first
+    try:
+        caption = f"🎬 {title[:100]}\n👤 {author}"
         if duration:
-            parts.append(f"⏱️ Thời lượng: {duration}s")
+            caption += f" | ⏱️ {duration}s"
         if views:
-            parts.append(f"👁️ Lượt xem: {views:,}")
-        parts.append("")
-        
-        # List available video streams
+            caption += f" | 👁️ {views:,}"
+        await update.message.reply_photo(photo=thumbnail, caption=caption)
+    except Exception as e:
+        log(f"Thumbnail send failed: {e}")
+    
+    # Build text message with download links
+    parts = [
+        f"🎬 LINK TẢI VIDEO YOUTUBE",
+        f"{'─' * 30}",
+        f"📝 {title[:200]}",
+        f"👤 Kênh: {author}",
+        f"🔗 https://www.youtube.com/watch?v={video_id}",
+        "",
+    ]
+    
+    if "error" not in streams:
+        # List available video streams (max 3 to keep message short)
         video_streams = streams.get("videoStreams") or []
         audio_streams = streams.get("audioStreams") or []
         
         if video_streams:
             parts.append("📥 LINK TẢI VIDEO:")
-            for vs in video_streams[:5]:
+            for vs in video_streams[:3]:
                 q = vs.get("quality", "?")
                 fmt = vs.get("format", "")
                 url_v = vs.get("url", "")
                 if url_v:
-                    parts.append(f"  • {q} ({fmt})")
+                    parts.append(f"  • {q} ({fmt}):")
                     parts.append(f"    {url_v}")
             parts.append("")
         
         if audio_streams:
-            parts.append("🎵 LINK TẢI AUDIO (MP3/MP4):")
-            for asr in audio_streams[:3]:
-                mime = asr.get("mimeType", "")[:40]
+            parts.append("🎵 LINK TẢI AUDIO:")
+            audio_streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
+            for asr in audio_streams[:2]:
+                mime = asr.get("mimeType", "")[:30]
                 bitrate = asr.get("bitrate", 0) // 1000
                 url_a = asr.get("url", "")
                 if url_a:
-                    parts.append(f"  • {mime} ({bitrate}kbps)")
+                    parts.append(f"  • {bitrate}kbps ({mime}):")
                     parts.append(f"    {url_a}")
             parts.append("")
         
         if not video_streams and not audio_streams:
-            parts.append("⚠️ Piped không trả được stream (có thể do YouTube chặn). Dùng link web dưới đây.")
+            parts.append("⚠️ Piped không trả được stream (YouTube bot detection)")
     else:
-        parts.append(f"⚠️ Piped: {streams['error']}")
+        parts.append(f"⚠️ Piped lỗi: {streams['error'][:80]}")
     
     # Fallback: web downloaders
-    parts.append("🌐 WEB DOWNLOADERS (backup):")
+    parts.append("🌐 WEB DOWNLOADERS (backup nếu link trên không được):")
     parts.append(f"  • ssyoutube: https://ssyoutube.com/watch?v={video_id}")
     parts.append(f"  • savefrom: https://en.savefrom.net/#url=https://www.youtube.com/watch?v={video_id}")
     parts.append(f"  • y2mate: https://www.y2mate.com/youtube/{video_id}")
@@ -2091,11 +2128,21 @@ async def cmd_ytmp3(update: Update, context):
     
     title = oembed.get("title", video_id)
     author = oembed.get("author_name", "Unknown")
+    thumbnail = oembed.get("thumbnail_url", f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg")
+    
+    # Send YouTube thumbnail as photo first
+    try:
+        await update.message.reply_photo(
+            photo=thumbnail,
+            caption=f"🎵 {title[:100]}\n👤 {author}"
+        )
+    except Exception as e:
+        log(f"Thumbnail send failed: {e}")
     
     parts = [
         f"🎵 YOUTUBE → MP3",
         f"{'─' * 30}",
-        f"📝 Tiêu đề: {title[:200]}",
+        f"📝 {title[:200]}",
         f"👤 Kênh: {author}",
         "",
     ]
