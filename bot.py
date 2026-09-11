@@ -39,6 +39,69 @@ POLLINATIONS_URL = "https://image.pollinations.ai/prompt"
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "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")
 PORT = int(os.environ.get("PORT", 10000))
 
+# ========== MULTI-PROVIDER AI CONFIG ==========
+# Provider API keys (env vars). Defaults allow fallback to Zernio AI Cloud proxy.
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "sk_bb6c27fe7e26d4c5a24ffed5d1c8969ffed0cdfb1592264c01cc7739a4a6ba05")
+GROQ_BASE = "https://api.groq.com/openai/v1"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
+
+# Provider registry — name → (base_url, env_key_var, display_name, model_listing_url)
+PROVIDERS = {
+    "aicloud": {
+        "name": "AI Cloud (Zernio proxy)",
+        "needs_key": False,  # uses JWT
+        "default_model": "gemini-1.5-flash",
+        "free_models": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"],
+    },
+    "openrouter": {
+        "name": "OpenRouter (437+ models)",
+        "needs_key": True,
+        "key_env": "OPENROUTER_API_KEY",
+        "base_url": OPENROUTER_BASE,
+        "default_model": "openrouter/auto",
+        "models_endpoint": f"{OPENROUTER_BASE}/models",
+        "note": "Free models end with :free — VD: nvidia/nemotron-3.5-lightning:free",
+    },
+    "groq": {
+        "name": "Groq (Llama, Mixtral — siêu nhanh)",
+        "needs_key": True,
+        "key_env": "GROQ_API_KEY",
+        "base_url": GROQ_BASE,
+        "default_model": "llama-3.3-70b-versatile",
+        "models_endpoint": f"{GROQ_BASE}/models",
+        "note": "Lấy key free tại: https://console.groq.com/keys",
+    },
+    "nvidia": {
+        "name": "Nvidia NIM (80+ models)",
+        "needs_key": True,
+        "key_env": "NVIDIA_API_KEY",
+        "base_url": NVIDIA_BASE,
+        "default_model": "deepseek-ai/deepseek-v4-flash-0731",
+        "models_endpoint": f"{NVIDIA_BASE}/models",
+        "note": "Key mặc định list được models nhưng chat cần key riêng",
+    },
+}
+
+# Per-chat provider+model selection: {chat_id: (provider_key, model_id)}
+# Falls back to ("aicloud", "gemini-1.5-flash") if not set
+user_provider_selection = {}
+
+def get_chat_ai_config(chat_id: str) -> tuple:
+    """Get (provider_key, model_id) for a chat. Returns default if not set."""
+    return user_provider_selection.get(chat_id, ("aicloud", "gemini-1.5-flash"))
+
+def set_chat_ai_config(chat_id: str, provider: str, model: str = None):
+    """Set provider+model for a chat."""
+    if provider not in PROVIDERS:
+        return False
+    if model is None:
+        model = PROVIDERS[provider]["default_model"]
+    user_provider_selection[chat_id] = (provider, model)
+    return True
+
 SYSTEM_PROMPT = """Bạn là NhutBot — trợ lý AI thân thiện trên Zalo.
 Trả lời ngắn gọn, hữu ích, bằng tiếng Việt.
 Nếu người dùng hỏi code, trả lời với code block rõ ràng."""
@@ -128,35 +191,153 @@ def get_jwt():
         log(f"AI JWT error: {e}")
     return ""
 
-def ai_reply(message: str) -> str:
+def _get_provider_api_key(provider: str) -> str:
+    """Get API key for a provider."""
+    p = PROVIDERS.get(provider, {})
+    if not p.get("needs_key"):
+        return ""
+    env_var = p.get("key_env", "")
+    return os.environ.get(env_var, "")
+
+def _fetch_provider_models(provider: str, limit: int = 30) -> list:
+    """Fetch real-time model list from a provider's /models endpoint."""
+    p = PROVIDERS.get(provider, {})
+    endpoint = p.get("models_endpoint")
+    if not endpoint:
+        return []
+    
+    # Cache key — refresh every hour
+    cache_key = f"models:{provider}"
+    cached = cache_get(cache_key, ttl_seconds=3600)
+    if cached:
+        return cached[:limit]
+    
+    try:
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        api_key = _get_provider_api_key(provider)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        r = requests.get(endpoint, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return [{"id": f"ERROR: HTTP {r.status_code}", "error": r.text[:100]}]
+        data = r.json()
+        # OpenAI-compatible: {data: [{id, ...}]}
+        models = data.get("data", []) or data.get("models", [])
+        # Normalize
+        result = []
+        for m in models[:200]:  # cap at 200
+            mid = m.get("id") if isinstance(m, dict) else str(m)
+            if not mid:
+                continue
+            entry = {"id": mid}
+            if isinstance(m, dict):
+                if m.get("context_length"):
+                    entry["context"] = m.get("context_length")
+                pr = m.get("pricing", {})
+                if isinstance(pr, dict) and pr.get("prompt"):
+                    try:
+                        entry["price"] = f"${float(pr['prompt'])*1e6:.2f}/Mtok"
+                    except Exception:
+                        pass
+                if m.get("owned_by"):
+                    entry["owner"] = m["owned_by"]
+            result.append(entry)
+        cache_set(cache_key, result)
+        return result[:limit]
+    except Exception as e:
+        return [{"id": f"ERROR: {e}", "error": str(e)[:100]}]
+
+def _call_provider(provider: str, model: str, messages: list, max_tokens: int = 1024, temperature: float = 0.7) -> dict:
+    """Call a specific provider with the given model. Returns {ok, content, error}."""
+    p = PROVIDERS.get(provider)
+    if not p:
+        return {"ok": False, "error": f"Provider '{provider}' không tồn tại"}
+    
+    # AI Cloud uses Zernio JWT
+    if provider == "aicloud":
+        global ai_jwt
+        if not ai_jwt:
+            ai_jwt = get_jwt()
+        if not ai_jwt:
+            return {"ok": False, "error": "Không lấy được JWT từ AI Cloud"}
+        try:
+            resp = requests.post(AI_CLOUD_URL, headers={
+                "Authorization": f"Bearer {ai_jwt}",
+                "Content-Type": "application/json",
+            }, json={
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }, timeout=60)
+            if resp.status_code == 200:
+                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                actual_model = resp.json().get("model", model)
+                return {"ok": True, "content": content, "model": actual_model}
+            elif resp.status_code == 401:
+                ai_jwt = get_jwt()
+                if ai_jwt:
+                    return _call_provider(provider, model, messages, max_tokens, temperature)
+            return {"ok": False, "error": f"AI Cloud HTTP {resp.status_code}: {resp.text[:200]}"}
+        except Exception as e:
+            return {"ok": False, "error": f"Lỗi: {e}"}
+    
+    # Other providers — OpenAI-compatible API
+    api_key = _get_provider_api_key(provider)
+    if not api_key:
+        return {"ok": False, "error": f"Chưa set {p.get('key_env','API_KEY')}. /providers để xem hướng dẫn"}
+    
+    base_url = p.get("base_url")
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        # OpenRouter recommends X-Title
+        if provider == "openrouter":
+            headers["X-Title"] = "NhutBot-Zalo"
+            headers["HTTP-Referer"] = "https://zalo-bot-three.vercel.app/"
+        
+        resp = requests.post(f"{base_url}/chat/completions", headers=headers, json={
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }, timeout=60)
+        if resp.status_code == 200:
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            actual_model = data.get("model", model)
+            return {"ok": True, "content": content, "model": actual_model}
+        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Lỗi: {e}"}
+
+def ai_reply(message: str, chat_id: str = None) -> str:
+    """AI reply with per-chat provider+model support."""
     global ai_jwt
     stats["ai_calls"] += 1
-    if not ai_jwt:
-        ai_jwt = get_jwt()
-    if not ai_jwt:
-        return "Xin lỗi, AI đang bảo trì. Thử lại sau."
-    try:
-        resp = requests.post(AI_CLOUD_URL, headers={
-            "Authorization": f"Bearer {ai_jwt}",
-            "Content-Type": "application/json",
-        }, json={
-            "model": "gemini-1.5-flash",
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": message},
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.7,
-        }, timeout=30)
-        if resp.status_code == 200:
-            return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "?")
-        elif resp.status_code == 401:
-            ai_jwt = get_jwt()
-            if ai_jwt: return ai_reply(message)
-        return f"AI lỗi (HTTP {resp.status_code})"
-    except Exception as e:
-        stats["errors"] += 1
-        return f"Lỗi: {e}"
+    
+    # Get chat-specific config (default to AI Cloud)
+    provider, model = ("aicloud", "gemini-1.5-flash")
+    if chat_id:
+        provider, model = get_chat_ai_config(chat_id)
+    
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": message},
+    ]
+    
+    result = _call_provider(provider, model, messages)
+    if result.get("ok"):
+        return result.get("content", "?")
+    # Fallback to AI Cloud if selected provider fails
+    if provider != "aicloud":
+        log(f"⚠️ {provider}/{model} failed: {result.get('error','?')[:80]}. Falling back to AI Cloud.")
+        result = _call_provider("aicloud", "gemini-1.5-flash", messages)
+        if result.get("ok"):
+            return f"⚠️ Provider {provider}/{model} lỗi, dùng AI Cloud fallback:\n\n" + result.get("content", "?")
+    return f"❌ Lỗi AI: {result.get('error', 'unknown')}"
 
 def make_image_url(prompt: str) -> str:
     import urllib.parse
@@ -637,9 +818,12 @@ async def cmd_start(update: Update, context):
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     await update.message.reply_text(
         f"🤖 Chào {name}!\n\nTôi là NhutBot trên Zalo.\n\n"
-        "📝 38 LỆNH:\n\n"
-        "🤖 AI:\n"
+        "📝 41 LỆNH:\n\n"
+        "🤖 AI (multi-provider):\n"
         "• Nhắn tin → AI trả lời\n"
+        "• /providers — Xem providers\n"
+        "• /models <provider> — List models\n"
+        "• /setmodel <provider> [model] — Chọn\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
         "• /code <câu hỏi> → Hỏi code\n"
         "• /translate [lang] <text> → Dịch\n\n"
@@ -690,9 +874,14 @@ async def cmd_start(update: Update, context):
 
 async def cmd_help(update: Update, context):
     await update.message.reply_text(
-        "📋 NhutBot v6 — 38 LỆNH\n\n"
-        "🤖 AI & CHAT\n"
+        "📋 NhutBot v7 — 41 LỆNH\n\n"
+        "🤖 AI & MULTI-PROVIDER\n"
         "• Nhắn tin → AI trả lời\n"
+        "• /providers — 4 providers: AI Cloud, OpenRouter, Groq, Nvidia NIM\n"
+        "• /models <provider> [filter] — List models real-time\n"
+        "• /setmodel <provider> [model] — Chọn provider+model cho chat\n"
+        "    VD: /setmodel groq llama-3.3-70b-versatile\n"
+        "    VD: /setmodel openrouter nvidia/nemotron-3.5-lightning:free\n"
         "• /image <mô tả> → Tạo ảnh AI\n"
         "• /code <câu hỏi> → Hỏi code\n"
         "• /translate [lang] <text> → Dịch\n\n"
@@ -762,7 +951,7 @@ async def cmd_code(update: Update, context):
         return
     question = " ".join(context.args)
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
-    reply = ai_reply(f"Bạn là chuyên gia lập trình. Trả lời ngắn gọn với code:\n\n{question}")
+    reply = ai_reply(f"Bạn là chuyên gia lập trình. Trả lời ngắn gọn với code:\n\n{question}", chat_id=update.message.chat.id)
     await update.message.reply_text(reply)
     stats["messages_sent"] += 1
     log(f"/code: {question[:50]}")
@@ -1002,52 +1191,32 @@ async def cmd_translate(update: Update, context):
     await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
     log(f"/translate -> {target_lang}: {text_to_translate[:60]}")
     
-    # Use AI Cloud proxy for translation (more reliable than Google Translate API which blocks bots)
-    try:
-        if not ai_jwt:
-            get_jwt()
-        if not ai_jwt:
-            await update.message.reply_text("❌ Dịch vụ AI đang bảo trì, thử lại sau.")
-            stats["errors"] += 1
-            return
-        
-        lang_names = {
-            "vi": "tiếng Việt", "en": "English", "zh": "Chinese (Simplified)",
-            "ja": "Japanese", "ko": "Korean", "fr": "French", "de": "German",
-            "es": "Spanish", "ru": "Russian", "th": "Thai", "it": "Italian", "pt": "Portuguese",
-        }
-        target_name = lang_names.get(target_lang, target_lang)
-        
-        prompt = (
-            f"You are a professional translator. Translate the following text into {target_name}. "
-            f"Only output the translation, no explanation.\n\nText: {text_to_translate}\n\nTranslation:"
+    lang_names = {
+        "vi": "tiếng Việt", "en": "English", "zh": "Chinese (Simplified)",
+        "ja": "Japanese", "ko": "Korean", "fr": "French", "de": "German",
+        "es": "Spanish", "ru": "Russian", "th": "Thai", "it": "Italian", "pt": "Portuguese",
+    }
+    target_name = lang_names.get(target_lang, target_lang)
+    
+    prompt = (
+        f"You are a professional translator. Translate the following text into {target_name}. "
+        f"Only output the translation, no explanation.\n\nText: {text_to_translate}\n\nTranslation:"
+    )
+    
+    # Use the chat's selected provider+model
+    result = ai_reply(prompt, chat_id=update.message.chat.id)
+    
+    if result and not result.startswith("❌"):
+        translated = result.strip()
+        result_text = (
+            f"🌐 DỊCH → {target_name}\n"
+            f"{'─' * 30}\n"
+            f"📝 Gốc: {text_to_translate[:500]}\n"
+            f"✅ Dịch: {translated[:1000]}"
         )
-        
-        resp = requests.post(AI_CLOUD_URL, headers={
-            "Authorization": f"Bearer {ai_jwt}",
-            "Content-Type": "application/json",
-        }, json={
-            "model": "gemini-1.5-flash",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1024,
-            "temperature": 0.3,
-        }, timeout=30)
-        
-        if resp.status_code == 200:
-            translated = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            stats["ai_calls"] += 1
-            result_text = (
-                f"🌐 DỊCH → {target_name}\n"
-                f"{'─' * 30}\n"
-                f"📝 Gốc: {text_to_translate[:500]}\n"
-                f"✅ Dịch: {translated[:1000]}"
-            )
-            await update.message.reply_text(result_text)
-        else:
-            await update.message.reply_text(f"❌ Lỗi dịch (HTTP {resp.status_code})")
-            stats["errors"] += 1
-    except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi dịch: {e}")
+        await update.message.reply_text(result_text)
+    else:
+        await update.message.reply_text(f"❌ Lỗi dịch: {result}")
         stats["errors"] += 1
     
     stats["messages_sent"] += 1
@@ -3110,16 +3279,271 @@ async def cmd_palindrome(update: Update, context):
     log(f"🤖 Palindrome reply sent")
 
 
+# ========== MULTI-PROVIDER AI COMMANDS (v7) ==========
+
+async def cmd_providers(update: Update, context):
+    """List all available AI providers — /providers"""
+    chat_id = update.message.chat.id
+    current_provider, current_model = get_chat_ai_config(chat_id)
+    
+    parts = [
+        f"🤖 AI PROVIDERS",
+        f"{'─' * 30}",
+        f"📌 Đang dùng: **{current_provider}** / `{current_model}`",
+        f"{'─' * 30}",
+        "",
+    ]
+    
+    for key, p in PROVIDERS.items():
+        active = "✅" if key == current_provider else "  "
+        api_key = _get_provider_api_key(key)
+        status = "🟢 có key" if api_key else ("🆓 không cần key" if not p.get("needs_key") else "🔴 thiếu key")
+        parts.append(f"{active} **{key}** — {p.get('name','?')}")
+        parts.append(f"   {status} | default: `{p.get('default_model','?')}`")
+        if p.get("note"):
+            parts.append(f"   💡 {p['note']}")
+        parts.append("")
+    
+    parts.append("📖 Lệnh:")
+    parts.append("  • /models <provider> — xem models (real-time)")
+    parts.append("  • /setmodel <provider> [model] — chọn provider+model")
+    parts.append("  • /setmodel aicloud — reset về mặc định")
+    parts.append("")
+    parts.append("🔑 Set API key:")
+    parts.append("  OpenRouter: https://openrouter.ai/keys")
+    parts.append("  Groq: https://console.groq.com/keys")
+    parts.append("  Nvidia NIM: https://build.nvidia.com/")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "providers_count" not in stats:
+        stats["providers_count"] = 0
+    stats["providers_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Providers list sent")
+
+
+async def cmd_models(update: Update, context):
+    """List models from a provider (real-time) — /models <provider> [filter]"""
+    if not context.args:
+        # Show counts per provider
+        parts = [
+            f"📦 MODELS THEO PROVIDER",
+            f"{'─' * 30}",
+            "",
+        ]
+        for key, p in PROVIDERS.items():
+            cache_key = f"models:{key}"
+            cached = cache_get(cache_key, ttl_seconds=3600)
+            count = len(cached) if cached else "?"
+            api_key = _get_provider_api_key(key)
+            status = "🟢" if api_key else ("🆓" if not p.get("needs_key") else "🔴")
+            parts.append(f"{status} {key} — {count} models (cache 1h)")
+        parts.append("")
+        parts.append("Cách dùng: /models <provider> [filter]")
+        parts.append("VD:")
+        parts.append("  /models openrouter")
+        parts.append("  /models openrouter free  (filter free)")
+        parts.append("  /models groq")
+        parts.append("  /models nvidia")
+        parts.append("  /models aicloud")
+        await update.message.reply_text("\n".join(parts))
+        stats["messages_sent"] += 1
+        return
+    
+    provider = context.args[0].lower()
+    if provider not in PROVIDERS:
+        await update.message.reply_text(f"❌ Provider '{provider}' không tồn tại. Dùng /providers để xem danh sách.")
+        stats["errors"] += 1
+        return
+    
+    # Optional filter (e.g. "free", "llama", "deepseek")
+    filter_str = " ".join(context.args[1:]).lower() if len(context.args) > 1 else ""
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/models {provider} (filter={filter_str})")
+    
+    # Fetch models
+    models = _fetch_provider_models(provider, limit=200)
+    
+    # Filter
+    if filter_str:
+        models = [m for m in models if filter_str in (m.get("id","") + " " + str(m.get("owner",""))).lower()]
+    
+    if not models:
+        await update.message.reply_text(f"❌ Không có model nào cho '{provider}' (filter='{filter_str}')")
+        stats["errors"] += 1
+        return
+    
+    # Check if it's an error response
+    if models and "error" in models[0]:
+        await update.message.reply_text(f"❌ Lỗi lấy models: {models[0].get('error','?')}")
+        stats["errors"] += 1
+        return
+    
+    # Build message
+    p = PROVIDERS[provider]
+    parts = [
+        f"📦 MODELS — {p.get('name','?')}",
+        f"{'─' * 30}",
+        f"📊 Tổng: {len(models)} models" + (f" (filter: '{filter_str}')" if filter_str else ""),
+        "",
+    ]
+    
+    # Show first 30 models
+    for i, m in enumerate(models[:30], 1):
+        mid = m.get("id", "?")
+        ctx = m.get("context", "")
+        price = m.get("price", "")
+        owner = m.get("owner", "")
+        info_parts = []
+        if ctx:
+            info_parts.append(f"ctx={ctx//1000}K" if isinstance(ctx, int) else f"ctx={ctx}")
+        if price:
+            info_parts.append(price)
+        if owner:
+            info_parts.append(owner)
+        info = " | ".join(info_parts) if info_parts else ""
+        parts.append(f"{i:2d}. `{mid}`")
+        if info:
+            parts.append(f"    {info}")
+    
+    if len(models) > 30:
+        parts.append("")
+        parts.append(f"📝 Còn {len(models) - 30} models nữa. Dùng filter để xem:")
+        parts.append(f"  /models {provider} <từ khóa>")
+        parts.append(f"VD: /models {provider} llama")
+    
+    parts.append("")
+    parts.append(f"💡 Chọn: /setmodel {provider} <model_id>")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        # Send in chunks
+        chunks = []
+        current = []
+        current_len = 0
+        for line in msg.split("\n"):
+            if current_len + len(line) > 1800 and current:
+                chunks.append("\n".join(current))
+                current = [line]
+                current_len = len(line)
+            else:
+                current.append(line)
+                current_len += len(line) + 1
+        if current:
+            chunks.append("\n".join(current))
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "models_count" not in stats:
+        stats["models_count"] = 0
+    stats["models_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Models reply sent ({len(models)} models)")
+
+
+async def cmd_setmodel(update: Update, context):
+    """Set provider+model for this chat — /setmodel <provider> [model]"""
+    if not context.args:
+        chat_id = update.message.chat.id
+        current_provider, current_model = get_chat_ai_config(chat_id)
+        await update.message.reply_text(
+            f"⚙️ SET PROVIDER + MODEL\n\n"
+            f"📌 Hiện tại: `{current_provider}` / `{current_model}`\n\n"
+            f"Cách dùng:\n"
+            f"  /setmodel <provider>\n"
+            f"  /setmodel <provider> <model_id>\n"
+            f"  /setmodel aicloud — reset mặc định\n\n"
+            f"Providers:\n"
+            f"  • aicloud — AI Cloud (Gemini 1.5 Flash) — mặc định\n"
+            f"  • openrouter — 437+ models (free + paid)\n"
+            f"  • groq — Llama, Mixtral (siêu nhanh)\n"
+            f"  • nvidia — Nvidia NIM (80+ models)\n\n"
+            f"VD:\n"
+            f"  /setmodel groq\n"
+            f"  /setmodel groq llama-3.3-70b-versatile\n"
+            f"  /setmodel openrouter nvidia/nemotron-3.5-lightning:free\n"
+            f"  /setmodel aicloud\n\n"
+            f"Xem models: /models <provider>"
+        )
+        stats["messages_sent"] += 1
+        return
+    
+    provider = context.args[0].lower()
+    if provider not in PROVIDERS:
+        await update.message.reply_text(
+            f"❌ Provider '{provider}' không tồn tại.\n\n"
+            f"Providers khả dụng: {', '.join(PROVIDERS.keys())}\n"
+            f"Dùng /providers để xem chi tiết."
+        )
+        stats["errors"] += 1
+        return
+    
+    # Get model (optional)
+    model = " ".join(context.args[1:]) if len(context.args) > 1 else PROVIDERS[provider]["default_model"]
+    
+    # Check if API key is set (for non-default providers)
+    p = PROVIDERS[provider]
+    if p.get("needs_key"):
+        api_key = _get_provider_api_key(provider)
+        if not api_key:
+            await update.message.reply_text(
+                f"⚠️ Provider **{provider}** cần API key nhưng chưa set!\n\n"
+                f"Lấy key tại:\n"
+                f"  OpenRouter: https://openrouter.ai/keys\n"
+                f"  Groq: https://console.groq.com/keys\n"
+                f"  Nvidia NIM: https://build.nvidia.com/\n\n"
+                f"Set env var {p.get('key_env','API_KEY')} trên Vercel để dùng được."
+            )
+            stats["errors"] += 1
+            return
+    
+    # Set
+    chat_id = update.message.chat.id
+    ok = set_chat_ai_config(chat_id, provider, model)
+    if ok:
+        p_name = PROVIDERS[provider].get("name", provider)
+        await update.message.reply_text(
+            f"✅ Đã set provider cho chat này!\n\n"
+            f"📡 Provider: `{provider}` ({p_name})\n"
+            f"🤖 Model: `{model}`\n\n"
+            f"Từ giờ các tin nhắn của bạn sẽ dùng provider+model này.\n"
+            f"Reset về mặc định: /setmodel aicloud\n\n"
+            f"💡 Test: nhắn 'Xin chào' để xem AI trả lời."
+        )
+        log(f"✅ Set {chat_id} → {provider}/{model}")
+        if "setmodel_count" not in stats:
+            stats["setmodel_count"] = 0
+        stats["setmodel_count"] += 1
+    else:
+        await update.message.reply_text(f"❌ Không set được. Provider '{provider}' không hợp lệ.")
+        stats["errors"] += 1
+    
+    stats["messages_sent"] += 1
+
+
 async def on_message(update: Update, context):
     stats["messages_received"] += 1
     msg = update.message.text
+    chat_id = update.message.chat.id
     user = update.effective_user.display_name if update.effective_user else "?"
     log(f"📨 {user}: {msg[:60]}")
     
-    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
     await asyncio.sleep(0.3)
     
-    reply = ai_reply(msg)
+    # Use chat-specific provider+model
+    reply = ai_reply(msg, chat_id=chat_id)
     if len(reply) > 1900:
         for i in range(0, len(reply), 1900):
             await update.message.reply_text(reply[i:i+1900])
@@ -3182,6 +3606,10 @@ def init_bot():
     bot_app.add_handler(CommandHandler("horoscope", cmd_horoscope))
     bot_app.add_handler(CommandHandler("reverse", cmd_reverse))
     bot_app.add_handler(CommandHandler("palindrome", cmd_palindrome))
+    # 3 new commands (v7) — multi-provider AI
+    bot_app.add_handler(CommandHandler("providers", cmd_providers))
+    bot_app.add_handler(CommandHandler("models", cmd_models))
+    bot_app.add_handler(CommandHandler("setmodel", cmd_setmodel))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
