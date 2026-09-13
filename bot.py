@@ -3532,6 +3532,457 @@ async def cmd_setmodel(update: Update, context):
     stats["messages_sent"] += 1
 
 
+# ========== NhutCoder Team Web Monitor Commands (v8) ==========
+
+NHUTCODER_BASE = "https://nhutcoder-team-v2.vercel.app"
+NHUTCODER_API = f"{NHUTCODER_BASE}/api"
+
+def _check_web_health(url: str) -> dict:
+    """Check HTTP status + response time of a URL."""
+    import time as _time
+    try:
+        start = _time.time()
+        r = requests.get(url, timeout=15, headers={"User-Agent": "NhutBot/1.0"})
+        elapsed = _time.time() - start
+        return {
+            "ok": True,
+            "status_code": r.status_code,
+            "response_time_ms": round(elapsed * 1000),
+            "content_length": len(r.content),
+            "server": r.headers.get("server", "?"),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+async def cmd_webhealth(update: Update, context):
+    """Check NhutCoder Team web health — /webhealth"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/webhealth")
+    
+    # Check main pages + API endpoints
+    checks = [
+        ("Homepage", f"{NHUTCODER_BASE}/"),
+        ("Auth API", f"{NHUTCODER_API}/auth/debug-token"),
+        ("Blog API", f"{NHUTCODER_API}/blog/posts"),
+        ("Products API", f"{NHUTCODER_API}/products"),
+        ("Contact API", f"{NHUTCODER_API}/contact"),
+    ]
+    
+    parts = [
+        f"🌐 NHUTCODER TEAM — WEB HEALTH",
+        f"{'─' * 30}",
+        f"🔗 URL: {NHUTCODER_BASE}",
+        f"{'─' * 30}",
+        "",
+    ]
+    
+    all_ok = True
+    for name, url in checks:
+        result = _check_web_health(url)
+        if result.get("ok"):
+            status = result["status_code"]
+            time_ms = result["response_time_ms"]
+            emoji = "✅" if status == 200 else "⚠️"
+            if status != 200:
+                all_ok = False
+            parts.append(f"{emoji} {name}: HTTP {status} ({time_ms}ms)")
+        else:
+            all_ok = False
+            parts.append(f"❌ {name}: {result.get('error','?')[:80]}")
+    
+    parts.append("")
+    parts.append(f"{'✅ Tất cả OK!' if all_ok else '⚠️ Có vấn đề!'}")
+    
+    await update.message.reply_text("\n".join(parts))
+    if "webhealth_count" not in stats:
+        stats["webhealth_count"] = 0
+    stats["webhealth_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Webhealth reply sent")
+
+
+async def cmd_dbtables(update: Update, context):
+    """List DB tables + row counts — /dbtables"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/dbtables")
+    
+    # Call the public blog API to verify DB is working
+    # Also try /api/auth/debug-token which is public
+    parts = [f"🗄️ NHUTCODER DB — TABLE STATUS", f"{'─' * 30}", ""]
+    
+    # Check blog posts (public API — reflects DB state)
+    try:
+        r = requests.get(f"{NHUTCODER_API}/blog/posts", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            posts = data.get("posts", [])
+            parts.append(f"📝 blog_posts: {len(posts)} rows")
+            if posts:
+                latest = posts[0]
+                parts.append(f"   Latest: {latest.get('title','?')[:60]}")
+        else:
+            parts.append(f"📝 blog_posts: HTTP {r.status_code}")
+    except Exception as e:
+        parts.append(f"📝 blog_posts: ❌ {str(e)[:60]}")
+    
+    # Check products
+    try:
+        r = requests.get(f"{NHUTCODER_API}/products", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            products = data.get("products", data) if isinstance(data, dict) else data
+            count = len(products) if isinstance(products, list) else "?"
+            parts.append(f"📦 projects: {count} rows")
+        else:
+            parts.append(f"📦 projects: HTTP {r.status_code}")
+    except Exception as e:
+        parts.append(f"📦 projects: ❌ {str(e)[:60]}")
+    
+    # Check auth (debug-token = DB works)
+    try:
+        r = requests.get(f"{NHUTCODER_API}/auth/debug-token", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            jwt_ok = bool(data.get("mint", {}).get("token"))
+            parts.append(f"🔐 users + otp_codes: {'✅ DB OK' if jwt_ok else '⚠️ DB issue'}")
+            parts.append(f"   JWT minted: {'yes' if jwt_ok else 'no'}")
+        else:
+            parts.append(f"🔐 auth: HTTP {r.status_code}")
+    except Exception as e:
+        parts.append(f"🔐 auth: ❌ {str(e)[:60]}")
+    
+    # Check contact (POST endpoint — just verify it exists)
+    try:
+        r = requests.get(f"{NHUTCODER_API}/contact", timeout=10)
+        parts.append(f"📧 contacts: {'✅' if r.status_code in (200, 405) else '⚠️'} HTTP {r.status_code}")
+    except Exception as e:
+        parts.append(f"📧 contacts: ❌ {str(e)[:60]}")
+    
+    # DB schema info (from drizzle schema)
+    parts.append("")
+    parts.append("📋 DB: Cloudflare D1 (SQLite)")
+    parts.append("📐 Tables: contacts, blog_posts, projects, newsletter, images, users, otp_codes")
+    
+    await update.message.reply_text("\n".join(parts))
+    if "dbtables_count" not in stats:
+        stats["dbtables_count"] = 0
+    stats["dbtables_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 DB tables reply sent")
+
+
+async def cmd_blogposts(update: Update, context):
+    """List recent blog posts — /blogposts"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/blogposts")
+    
+    try:
+        r = requests.get(f"{NHUTCODER_API}/blog/posts", timeout=15)
+        if r.status_code != 200:
+            await update.message.reply_text(f"❌ Lỗi tải blog: HTTP {r.status_code}")
+            stats["errors"] += 1
+            return
+        
+        posts = r.json().get("posts", [])
+        if not posts:
+            await update.message.reply_text("📝 Chưa có bài viết nào trên blog.")
+            return
+        
+        parts = [
+            f"📝 NHUTCODER BLOG — {len(posts)} bài viết",
+            f"{'─' * 30}",
+            "",
+        ]
+        for i, post in enumerate(posts[:10], 1):
+            title = post.get("title", "?")[:60]
+            category = post.get("category", "")[:20]
+            featured = "⭐ " if post.get("featured") else "  "
+            slug = post.get("slug", "")
+            date = (post.get("created_at") or "")[:10]
+            parts.append(f"{featured}{i}. {title}")
+            if category:
+                parts.append(f"   📂 {category} | 📅 {date}")
+            if slug:
+                parts.append(f"   🔗 {NHUTCODER_BASE}/blog/{slug}")
+            parts.append("")
+        
+        if len(posts) > 10:
+            parts.append(f"📝 Còn {len(posts) - 10} bài nữa...")
+        
+        msg = "\n".join(parts)
+        if len(msg) > 1900:
+            for i in range(0, len(msg), 1900):
+                await update.message.reply_text(msg[i:i+1900])
+                await asyncio.sleep(0.3)
+        else:
+            await update.message.reply_text(msg)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    if "blogposts_count" not in stats:
+        stats["blogposts_count"] = 0
+    stats["blogposts_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Blog posts reply sent")
+
+
+async def cmd_projects(update: Update, context):
+    """List projects from DB — /projects"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/projects")
+    
+    try:
+        r = requests.get(f"{NHUTCODER_API}/products", timeout=15)
+        if r.status_code != 200:
+            await update.message.reply_text(f"❌ Lỗi tải projects: HTTP {r.status_code}")
+            stats["errors"] += 1
+            return
+        
+        data = r.json()
+        projects = data.get("products", data) if isinstance(data, dict) else data
+        if not projects:
+            await update.message.reply_text("📦 Chưa có project nào.")
+            return
+        
+        parts = [
+            f"📦 NHUTCODER PROJECTS — {len(projects)} projects",
+            f"{'─' * 30}",
+            "",
+        ]
+        for i, p in enumerate(projects[:10], 1):
+            name = p.get("name", "?")[:60]
+            desc = p.get("description", "")[:80]
+            tech = p.get("tech", "")[:60]
+            demo = p.get("demoUrl", "")
+            featured = "⭐ " if p.get("featured") else "  "
+            parts.append(f"{featured}{i}. {name}")
+            if desc:
+                parts.append(f"   📝 {desc}")
+            if tech:
+                parts.append(f"   🛠️ Tech: {tech}")
+            if demo:
+                parts.append(f"   🔗 {demo}")
+            parts.append("")
+        
+        msg = "\n".join(parts)
+        if len(msg) > 1900:
+            for i in range(0, len(msg), 1900):
+                await update.message.reply_text(msg[i:i+1900])
+                await asyncio.sleep(0.3)
+        else:
+            await update.message.reply_text(msg)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    if "projects_count_cmd" not in stats:
+        stats["projects_count_cmd"] = 0
+    stats["projects_count_cmd"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Projects reply sent")
+
+
+async def cmd_webinfo(update: Update, context):
+    """Show NhutCoder Team web info — /webinfo"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/webinfo")
+    
+    # Check homepage + get headers
+    try:
+        r = requests.get(f"{NHUTCODER_BASE}/", timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        
+        parts = [
+            f"ℹ️ NHUTCODER TEAM — WEB INFO",
+            f"{'─' * 30}",
+            f"🌐 URL: {NHUTCODER_BASE}",
+            f"📊 HTTP Status: {r.status_code}",
+            f"🖥️ Server: {r.headers.get('server', '?')}",
+            f"⚡ Response: {round(r.elapsed.total_seconds() * 1000)}ms",
+            f"📦 Content-Length: {len(r.content):,} bytes",
+            f"🔐 CSP: {'✅ enabled' if 'content-security-policy' in {k.lower() for k in r.headers} else '❌ disabled'}",
+            f"🔒 HSTS: {'✅ enabled' if 'strict-transport-security' in {k.lower() for k in r.headers} else '❌ disabled'}",
+            f"🛡️ X-Frame-Options: {r.headers.get('x-frame-options', '❌')}",
+            "",
+            f"📋 API Endpoints:",
+            f"  • /api/auth/debug-token — JWT mint",
+            f"  • /api/auth/me — User info",
+            f"  • /api/blog/posts — Blog posts",
+            f"  • /api/products — Projects",
+            f"  • /api/contact — Contact form",
+            f"  • /api/admin/db-status — DB status (auth required)",
+            f"  • /api/upload — File upload",
+            f"  • /api/security/config — Security config",
+            "",
+            f"🗄️ DB: Cloudflare D1 (SQLite via drizzle-orm)",
+            f"🔐 Auth: Auth0 + JWT",
+            f"📦 Deploy: Vercel + Cloudflare R2",
+        ]
+        
+        await update.message.reply_text("\n".join(parts))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    if "webinfo_count" not in stats:
+        stats["webinfo_count"] = 0
+    stats["webinfo_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Webinfo reply sent")
+
+
+async def cmd_apiroutes(update: Update, context):
+    """List API routes — /apiroutes"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/apiroutes")
+    
+    routes = [
+        ("GET", "/api/auth/debug-token", "Mint test JWT (public)"),
+        ("GET", "/api/auth/me", "Current user info (auth)"),
+        ("POST", "/api/auth/logout", "Logout"),
+        ("GET", "/api/blog/posts", "List published blog posts"),
+        ("GET", "/api/blog/posts/[slug]", "Get single blog post"),
+        ("POST", "/api/blog/comments", "Add comment"),
+        ("POST", "/api/blog/likes", "Like a post"),
+        ("GET", "/api/products", "List projects"),
+        ("GET", "/api/products/[slug]", "Get single project"),
+        ("POST", "/api/contact", "Submit contact form"),
+        ("POST", "/api/upload", "Upload file (auth)"),
+        ("GET", "/api/admin/db-status", "DB table status (admin)"),
+        ("GET", "/api/admin/blog-posts", "Manage blog posts (admin)"),
+        ("GET", "/api/admin/products", "Manage projects (admin)"),
+        ("GET", "/api/admin/security", "Security dashboard (admin)"),
+        ("GET", "/api/bot-check", "Bot detection check"),
+        ("GET", "/api/security/config", "Security config"),
+        ("POST", "/api/security/self-ban", "Self-ban (security)"),
+    ]
+    
+    parts = [
+        f"🛣️ NHUTCODER API ROUTES — {len(routes)} endpoints",
+        f"{'─' * 30}",
+        "",
+    ]
+    
+    for method, path, desc in routes:
+        emoji = {"GET": "📥", "POST": "📤"}.get(method, "🔄")
+        parts.append(f"{emoji} {method:4} {path}")
+        parts.append(f"      {desc}")
+    
+    parts.append("")
+    parts.append(f"🌐 Base: {NHUTCODER_BASE}")
+    
+    msg = "\n".join(parts)
+    if len(msg) > 1900:
+        for i in range(0, len(msg), 1900):
+            await update.message.reply_text(msg[i:i+1900])
+            await asyncio.sleep(0.3)
+    else:
+        await update.message.reply_text(msg)
+    
+    if "apiroutes_count" not in stats:
+        stats["apiroutes_count"] = 0
+    stats["apiroutes_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 API routes reply sent")
+
+
+async def cmd_webping(update: Update, context):
+    """Ping NhutCoder Team + measure latency — /webping"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/webping")
+    
+    # Do 3 pings
+    parts = [
+        f"🏓 PING NHUTCODER TEAM",
+        f"{'─' * 30}",
+        f"🌐 Target: {NHUTCODER_BASE}",
+        "",
+    ]
+    
+    times = []
+    for i in range(3):
+        result = _check_web_health(f"{NHUTCODER_BASE}/")
+        if result.get("ok"):
+            ms = result["response_time_ms"]
+            times.append(ms)
+            parts.append(f"  Ping {i+1}: {ms}ms (HTTP {result['status_code']})")
+        else:
+            parts.append(f"  Ping {i+1}: ❌ {result.get('error','?')[:60]}")
+    
+    if times:
+        avg = sum(times) / len(times)
+        min_t = min(times)
+        max_t = max(times)
+        parts.append("")
+        parts.append(f"📊 Avg: {avg:.0f}ms | Min: {min_t}ms | Max: {max_t}ms")
+        if avg < 500:
+            parts.append("✅ Tốc độ tốt!")
+        elif avg < 1500:
+            parts.append("⚠️ Tốc độ khá chậm")
+        else:
+            parts.append("🔴 Rất chậm!")
+    
+    await update.message.reply_text("\n".join(parts))
+    if "webping_count" not in stats:
+        stats["webping_count"] = 0
+    stats["webping_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Webping reply sent")
+
+
+async def cmd_contact_check(update: Update, context):
+    """Check contact form status — /contactcheck"""
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/contactcheck")
+    
+    try:
+        # Try GET first (might return 405 for POST-only endpoint)
+        r = requests.get(f"{NHUTCODER_API}/contact", timeout=10)
+        
+        # Try a POST with empty data to see if endpoint is alive
+        r2 = requests.post(f"{NHUTCODER_API}/contact", json={}, timeout=10)
+        
+        parts = [
+            f"📧 CONTACT FORM CHECK",
+            f"{'─' * 30}",
+            f"🔗 URL: {NHUTCODER_API}/contact",
+            f"📥 GET: HTTP {r.status_code}",
+            f"📤 POST: HTTP {r2.status_code}",
+        ]
+        
+        if r2.status_code == 400:
+            parts.append("✅ Endpoint hoạt động (400 = cần data)")
+        elif r2.status_code == 200:
+            parts.append("✅ Endpoint hoạt động")
+        elif r2.status_code in (401, 403):
+            parts.append("⚠️ Cần auth")
+        else:
+            parts.append(f"⚠️ Status bất thường: {r2.status_code}")
+        
+        # DB schema info for contacts table
+        parts.append("")
+        parts.append("📋 contacts table schema:")
+        parts.append("  • name (text, required)")
+        parts.append("  • email (text, required)")
+        parts.append("  • company (text, optional)")
+        parts.append("  • project_type (text, optional)")
+        parts.append("  • budget (text, optional)")
+        parts.append("  • message (text, required)")
+        parts.append("  • status (default: 'new')")
+        
+        await update.message.reply_text("\n".join(parts))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    if "contactcheck_count" not in stats:
+        stats["contactcheck_count"] = 0
+    stats["contactcheck_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 Contact check reply sent")
+
+
 async def on_message(update: Update, context):
     stats["messages_received"] += 1
     msg = update.message.text
@@ -3610,6 +4061,15 @@ def init_bot():
     bot_app.add_handler(CommandHandler("providers", cmd_providers))
     bot_app.add_handler(CommandHandler("models", cmd_models))
     bot_app.add_handler(CommandHandler("setmodel", cmd_setmodel))
+    # 8 new commands (v8) — NhutCoder Team web monitor
+    bot_app.add_handler(CommandHandler("webhealth", cmd_webhealth))
+    bot_app.add_handler(CommandHandler("dbtables", cmd_dbtables))
+    bot_app.add_handler(CommandHandler("blogposts", cmd_blogposts))
+    bot_app.add_handler(CommandHandler("projects", cmd_projects))
+    bot_app.add_handler(CommandHandler("webinfo", cmd_webinfo))
+    bot_app.add_handler(CommandHandler("apiroutes", cmd_apiroutes))
+    bot_app.add_handler(CommandHandler("webping", cmd_webping))
+    bot_app.add_handler(CommandHandler("contactcheck", cmd_contact_check))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
