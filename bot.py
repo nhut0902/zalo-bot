@@ -3985,9 +3985,12 @@ def _generate_tts_audio(text: str, lang: str = "vi") -> str:
     if r.status_code != 200:
         return ""
     
-    # Step 2: Convert MP3 → AAC using pydub
+    # Step 2: Convert MP3 → AAC using pydub + imageio-ffmpeg
     try:
+        import imageio_ffmpeg
         from pydub import AudioSegment
+        # Use bundled ffmpeg binary from imageio-ffmpeg
+        AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
         audio = AudioSegment.from_mp3(io.BytesIO(r.content))
         aac_buf = io.BytesIO()
         audio.export(aac_buf, format="adts", codec="aac")
