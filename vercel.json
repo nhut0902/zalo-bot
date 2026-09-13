@@ -6,18 +6,14 @@
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "50mb",
-        "runtime": "python3.12"
+        "runtime": "python3.12",
+        "maxDuration": 60
       }
     }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "bot.py" }
   ],
-  "functions": {
-    "bot.py": {
-      "maxDuration": 60
-    }
-  },
   "env": {
     "ZALO_BOT_TOKEN": "1903914807132028399:BsUtmLazGynhSDfuGIwkzjcibFDuaCOsKoPauZopkPSiGmtoVexXKBANOjYHQhxU",
     "ZALO_BASE_URL": "https://bot-api.zaloplatforms.com",
