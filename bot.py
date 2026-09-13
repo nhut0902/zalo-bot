@@ -4234,47 +4234,56 @@ def logs():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Zalo webhook endpoint."""
+    """Zalo webhook endpoint — responds IMMEDIATELY then processes in background."""
     data = request.json or {}
     log(f"Webhook received: {json.dumps(data)[:300]}")
-    # Zalo wraps the update in `{"ok": true, "result": {...}}`
+    
+    # Respond 200 IMMEDIATELY so Zalo doesn't timeout
+    # Processing happens in a background thread
+    
     payload = data.get("result", data) if isinstance(data, dict) else data
     
-    # Skip Zalo webhook test events (event_name="webhook.test")
+    # Skip Zalo webhook test events
     event_name = payload.get("event_name") if isinstance(payload, dict) else None
     if event_name == "webhook.test":
         log("✅ Webhook test event received (ignoring)")
         return jsonify({"ok": True})
     
-    if not bot_app:
-        log("❌ bot_app not initialized")
-        return jsonify({"ok": False, "error": "bot not initialized"})
+    if not bot_app or not payload:
+        log("❌ bot_app or payload missing")
+        return jsonify({"ok": False, "error": "not ready"})
     
-    if not payload:
-        log("❌ empty payload")
-        return jsonify({"ok": False, "error": "empty payload"})
+    # Process in background thread to avoid Vercel timeout
+    def process_in_background():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Initialize bot if needed
+            if not bot_app.bot._initialized:
+                log("🔧 Initializing bot...")
+                loop.run_until_complete(bot_app.bot.initialize())
+            
+            update = Update.de_json(payload, bot_app.bot)
+            if update is None or update.message is None or update.message.chat is None:
+                log(f"❌ Invalid update (no message/chat)")
+                return
+            
+            log(f"✅ Processing update from chat_id={update.message.chat.id}")
+            loop.run_until_complete(bot_app.process_update(update))
+            loop.close()
+            log("✅ Update processed")
+        except Exception as e:
+            import traceback
+            log(f"❌ Webhook error: {e}")
+            log(f"❌ Traceback: {traceback.format_exc()[:500]}")
+            stats["errors"] += 1
     
-    try:
-        loop = asyncio.new_event_loop()
-        # Ensure bot is initialized (needed for httpx client)
-        if not bot_app.bot._initialized:
-            log("🔧 Initializing bot...")
-            loop.run_until_complete(bot_app.bot.initialize())
-        
-        update = Update.de_json(payload, bot_app.bot)
-        if update is None or update.message is None or update.message.chat is None:
-            log(f"❌ Invalid update (no message/chat): {json.dumps(payload)[:200]}")
-            return jsonify({"ok": False, "error": "invalid update"})
-        
-        log(f"✅ Processing update from chat_id={update.message.chat.id}")
-        loop.run_until_complete(bot_app.process_update(update))
-        loop.close()
-        log("✅ Update processed")
-    except Exception as e:
-        import traceback
-        log(f"❌ Webhook error: {e}")
-        log(f"❌ Traceback: {traceback.format_exc()[:500]}")
-        stats["errors"] += 1
+    # Start background thread
+    thread = threading.Thread(target=process_in_background, daemon=True)
+    thread.start()
+    
+    # Return immediately (Zalo gets 200 OK within <1s)
     return jsonify({"ok": True})
 
 
