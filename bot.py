@@ -4331,8 +4331,19 @@ def run_bot_polling():
 try:
     init_bot()
     log("Bot handlers initialized (webhook mode ready)")
+    # Pre-initialize bot's httpx client + get JWT to avoid cold-start delay
+    # This saves 2-3s on the first message
+    import asyncio as _asyncio
+    _loop = _asyncio.new_event_loop()
+    _loop.run_until_complete(bot_app.bot.initialize())
+    _loop.close()
+    log("✅ Bot httpx client pre-initialized")
+    # Pre-fetch AI JWT
+    get_jwt()
+    if ai_jwt:
+        log("✅ AI JWT pre-fetched")
 except Exception as e:
-    log(f"init_bot error (will retry on demand): {e}")
+    log(f"init error (will retry on demand): {e}")
 
 
 # ========== MAIN ==========
