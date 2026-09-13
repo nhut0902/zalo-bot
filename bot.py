@@ -3937,10 +3937,7 @@ async def cmd_contact_check(update: Update, context):
     log(f"/contactcheck")
     
     try:
-        # Try GET first (might return 405 for POST-only endpoint)
         r = requests.get(f"{NHUTCODER_API}/contact", timeout=10)
-        
-        # Try a POST with empty data to see if endpoint is alive
         r2 = requests.post(f"{NHUTCODER_API}/contact", json={}, timeout=10)
         
         parts = [
@@ -3960,16 +3957,9 @@ async def cmd_contact_check(update: Update, context):
         else:
             parts.append(f"⚠️ Status bất thường: {r2.status_code}")
         
-        # DB schema info for contacts table
         parts.append("")
         parts.append("📋 contacts table schema:")
-        parts.append("  • name (text, required)")
-        parts.append("  • email (text, required)")
-        parts.append("  • company (text, optional)")
-        parts.append("  • project_type (text, optional)")
-        parts.append("  • budget (text, optional)")
-        parts.append("  • message (text, required)")
-        parts.append("  • status (default: 'new')")
+        parts.append("  • name, email, company, project_type, budget, message, status")
         
         await update.message.reply_text("\n".join(parts))
     except Exception as e:
@@ -3981,6 +3971,129 @@ async def cmd_contact_check(update: Update, context):
     stats["contactcheck_count"] += 1
     stats["messages_sent"] += 1
     log(f"🤖 Contact check reply sent")
+
+
+# ========== TTS (Text-to-Speech) Command ==========
+
+def _generate_tts_audio(text: str, lang: str = "vi") -> str:
+    """Generate TTS audio, convert to AAC, upload to Zernio, return URL."""
+    import io, urllib.parse
+    
+    # Step 1: Download Google Translate TTS (MP3)
+    tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={urllib.parse.quote(text[:200])}&tl={lang}&client=tw-ob"
+    r = requests.get(tts_url, timeout=15)
+    if r.status_code != 200:
+        return ""
+    
+    # Step 2: Convert MP3 → AAC using pydub
+    try:
+        from pydub import AudioSegment
+        audio = AudioSegment.from_mp3(io.BytesIO(r.content))
+        aac_buf = io.BytesIO()
+        audio.export(aac_buf, format="adts", codec="aac")
+        aac_data = aac_buf.getvalue()
+    except ImportError:
+        # pydub not available — return MP3 URL (won't work with sendVoice)
+        return ""
+    
+    # Step 3: Upload AAC to Zernio media storage
+    ZERNIO_KEY = os.environ.get("ZERNIO_KEY", "sk_bb6c27fe7e26d4c5a24ffed5d1c8969ffed0cdfb1592264c01cc7739a4a6ba05")
+    try:
+        r2 = requests.post(
+            "https://api.zernio.com/v1/media/upload-direct",
+            headers={"Authorization": f"Bearer {ZERNIO_KEY}"},
+            files={"file": ("tts.aac", aac_data, "audio/aac")},
+            timeout=30
+        )
+        if r2.status_code == 200:
+            return r2.json().get("url", "")
+    except Exception:
+        pass
+    return ""
+
+
+async def cmd_tts(update: Update, context):
+    """Text-to-Speech — /tts <text> [lang]"""
+    if not context.args:
+        await update.message.reply_text(
+            "🔊 TEXT-TO-SPEECH\n\n"
+            "Cách dùng:\n"
+            "• /tts <text> → Tiếng Việt\n"
+            "• /tts en <text> → English\n"
+            "• /tts ja <text> → 日本語\n\n"
+            "VD:\n"
+            "  /tts Xin chào các bạn\n"
+            "  /tts en Hello everyone\n"
+            "  /tts ja こんにちは\n\n"
+            "📡 Nguồn: Google Translate TTS (FREE)\n"
+            "🎤 Voice: Zalo sendVoice (AAC)"
+        )
+        return
+    
+    # Parse lang (optional, first arg if 2-letter)
+    lang = "vi"
+    text_args = context.args
+    LANG_CODES = {"vi", "en", "ja", "ko", "zh", "fr", "de", "es", "ru", "th", "it", "pt"}
+    if context.args[0].lower() in LANG_CODES:
+        lang = context.args[0].lower()
+        text_args = context.args[1:]
+    
+    text = " ".join(text_args)
+    if not text:
+        await update.message.reply_text("❌ Vui lòng nhập nội dung cần chuyển thành giọng nói.")
+        return
+    
+    await context.bot.send_chat_action(chat_id=update.message.chat.id, action=ChatAction.TYPING)
+    log(f"/tts ({lang}): {text[:60]}")
+    
+    # Generate TTS audio
+    aac_url = _generate_tts_audio(text, lang)
+    
+    if not aac_url:
+        await update.message.reply_text(
+            "❌ Lỗi tạo TTS. Có thể:\n"
+            "• pydub chưa cài (cần ffmpeg)\n"
+            "• Google TTS API bị chặn\n"
+            "• Upload thất bại\n"
+            "Thử lại sau!"
+        )
+        stats["errors"] += 1
+        return
+    
+    # Send as voice message via Zalo API
+    try:
+        import asyncio as _aio
+        # Zalo sendVoice API (not in python-zalo-bot library, call directly)
+        ZALO_TOKEN = ZALO_BOT_TOKEN
+        ZALO_BASE = ZALO_BASE_URL
+        chat_id = update.message.chat.id
+        
+        # Use requests to call Zalo API directly (sendVoice)
+        r = requests.post(
+            f"{ZALO_BASE}/bot{ZALO_TOKEN}/sendVoice",
+            json={"chat_id": chat_id, "voice_url": aac_url},
+            timeout=15
+        )
+        if r.status_code == 200 and r.json().get("ok"):
+            log(f"✅ TTS voice sent")
+            # Also send text of what was spoken
+            lang_names = {"vi": "Tiếng Việt", "en": "English", "ja": "日本語", "ko": "한국어", "zh": "中文"}
+            await update.message.reply_text(
+                f"🔊 TTS ({lang_names.get(lang, lang)})\n"
+                f"📝 \"{text[:200]}\""
+            )
+        else:
+            await update.message.reply_text(f"❌ Lỗi gửi voice: {r.text[:200]}")
+            stats["errors"] += 1
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+        stats["errors"] += 1
+    
+    if "tts_count" not in stats:
+        stats["tts_count"] = 0
+    stats["tts_count"] += 1
+    stats["messages_sent"] += 1
+    log(f"🤖 TTS reply sent")
 
 
 async def on_message(update: Update, context):
@@ -4070,6 +4183,8 @@ def init_bot():
     bot_app.add_handler(CommandHandler("apiroutes", cmd_apiroutes))
     bot_app.add_handler(CommandHandler("webping", cmd_webping))
     bot_app.add_handler(CommandHandler("contactcheck", cmd_contact_check))
+    # TTS command (v8)
+    bot_app.add_handler(CommandHandler("tts", cmd_tts))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return bot_app
 
