@@ -4,5 +4,4 @@ python-zalo-bot
 requests
 tavily-python
 beautifulsoup4
-pydub
 imageio-ffmpeg

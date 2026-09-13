@@ -3985,16 +3985,34 @@ def _generate_tts_audio(text: str, lang: str = "vi") -> str:
     if r.status_code != 200:
         return ""
     
-    # Step 2: Convert MP3 → AAC using pydub + imageio-ffmpeg
+    # Step 2: Convert MP3 → AAC using ffmpeg directly (via subprocess)
     try:
-        import imageio_ffmpeg
-        from pydub import AudioSegment
-        # Use bundled ffmpeg binary from imageio-ffmpeg
-        AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
-        audio = AudioSegment.from_mp3(io.BytesIO(r.content))
-        aac_buf = io.BytesIO()
-        audio.export(aac_buf, format="adts", codec="aac")
-        aac_data = aac_buf.getvalue()
+        import subprocess, tempfile, imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        
+        # Write MP3 to temp file
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as mp3_tmp:
+            mp3_tmp.write(r.content)
+            mp3_path = mp3_tmp.name
+        
+        aac_path = mp3_path.replace(".mp3", ".aac")
+        
+        # Convert using ffmpeg directly
+        result = subprocess.run(
+            [ffmpeg_path, "-y", "-i", mp3_path, "-c:a", "aac", "-f", "adts", aac_path],
+            capture_output=True, timeout=30
+        )
+        
+        if result.returncode != 0:
+            os.unlink(mp3_path)
+            return ""
+        
+        with open(aac_path, "rb") as f:
+            aac_data = f.read()
+        
+        # Cleanup
+        os.unlink(mp3_path)
+        os.unlink(aac_path)
     except ImportError:
         # pydub not available — return MP3 URL (won't work with sendVoice)
         return ""
